@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Powermatix — Resource Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green:#2ECC71;--green-d:#27AE60;
+      --dark:#0D1117;--dark2:#161B22;--dark3:#21262D;--dark4:#2D333B;
+      --border:#30363D;--border2:#3D444D;
+      --text:#E6EDF3;--muted:#8B949E;--muted2:#6E7681;
+      --yellow:#F4C542;--red:#EB5757;--orange:#F4934A;--cyan:#56CCF2;--pink:#E056A0;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--dark);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh}
+    button{cursor:pointer;font-family:'DM Sans',sans-serif}
+    select,input,textarea{font-family:'DM Sans',sans-serif}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* LOADING */
+    #loadingOverlay{position:fixed;inset:0;background:var(--dark);z-index:9999;
+      display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px}
+    .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--green);
+      border-radius:50%;animation:spin .8s linear infinite}
+    .loading-txt{font-size:13px;color:var(--muted)}
+
+    /* HEADER */
+    .hdr{background:var(--dark2);border-bottom:1px solid var(--border);padding:11px 24px;
+      display:flex;align-items:center;justify-content:space-between;
+      position:sticky;top:0;z-index:300;gap:12px;flex-wrap:wrap}
+    .logo{display:flex;align-items:center;gap:9px}
+    .lmark{width:32px;height:32px;background:var(--green);border-radius:7px;display:flex;
+      align-items:center;justify-content:center;font-family:'Space Mono',monospace;
+      font-weight:700;font-size:12px;color:var(--dark);flex-shrink:0}
+    .lname{font-size:16px;font-weight:700;letter-spacing:-.4px}
+    .lname em{color:var(--green);font-style:normal}
+    .lsub{font-size:10px;color:var(--muted)}
+    .hdr-r{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .hbtn{display:flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;
+      font-size:12px;font-weight:600;border:1px solid var(--border2);
+      background:var(--dark3);color:var(--text);transition:.15s;white-space:nowrap;text-decoration:none}
+    .hbtn:hover{background:var(--dark4);border-color:var(--muted2)}
+    .hbtn.g{background:var(--green);border-color:var(--green);color:var(--dark)}
+    .hbtn.g:hover{background:var(--green-d)}
+    .hbtn.att{border-color:var(--cyan);color:var(--cyan)}
+    .hbtn.att:hover{background:rgba(86,203,242,.08)}
+    .cfg-row{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+    .cfg-inp{width:46px;background:var(--dark3);border:1px solid var(--border2);color:var(--text);
+      padding:4px 6px;border-radius:5px;font-size:12px;font-family:'Space Mono',monospace;text-align:center}
+    .cfg-sel{background:var(--dark3);border:1px solid var(--border2);color:var(--text);
+      padding:4px 7px;border-radius:5px;font-size:12px}
+    .user-info{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);
+      padding:0 6px;border-left:1px solid var(--border)}
+    .user-avatar{width:26px;height:26px;background:var(--dark3);border:1px solid var(--border2);
+      border-radius:50%;display:flex;align-items:center;justify-content:center;
+      font-weight:700;font-size:11px;color:var(--green)}
+    .signout{background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;
+      padding:3px 7px;border-radius:4px}
+    .signout:hover{color:var(--red);background:rgba(235,87,87,.1)}
+
+    /* SAVE STATUS */
+    .save-status{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px}
+    .save-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
+    .save-dot.saving{background:var(--yellow);animation:pulse 1s infinite}
+    .save-dot.error{background:var(--red)}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+    /* TABS */
+    .tabs{background:var(--dark2);border-bottom:1px solid var(--border);
+      padding:0 24px;display:flex;gap:2px}
+    .tbtn{padding:9px 14px;font-size:13px;font-weight:600;border:none;
+      background:transparent;color:var(--muted);cursor:pointer;
+      border-bottom:2px solid transparent;transition:.15s;margin-bottom:-1px;white-space:nowrap}
+    .tbtn.on{color:var(--green);border-bottom-color:var(--green)}
+    .tbtn:hover:not(.on){color:var(--text)}
+
+    /* MAIN */
+    .main{padding:20px 24px;max-width:1500px;margin:0 auto}
+    .pane{display:none}.pane.on{display:block}
+
+    /* WEEK NAV */
+    .wnav{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+    .wnarr{width:30px;height:30px;border-radius:6px;border:1px solid var(--border2);
+      background:var(--dark3);color:var(--text);font-size:15px;display:flex;
+      align-items:center;justify-content:center;transition:.15s;flex-shrink:0}
+    .wnarr:hover{background:var(--dark4)}
+    .wlbl{font-size:14px;font-weight:700;min-width:200px;text-align:center}
+    .wbadge{font-size:10px;background:rgba(46,204,113,.12);color:var(--green);
+      padding:2px 8px;border-radius:20px;display:none}
+    .wbadge.show{display:inline}
+    .wyear-sel,.wweek-sel{background:var(--dark3);border:1px solid var(--border2);
+      color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px}
+    .wweek-sel{min-width:160px}
+
+    /* KPI */
+    .kgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}
+    .kpi{background:var(--dark2);border:1px solid var(--border);border-radius:10px;
+      padding:14px 16px;position:relative;overflow:hidden}
+    .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--acc,var(--green))}
+    .kl{font-size:10px;text-transform:uppercase;letter-spacing:1.1px;color:var(--muted);margin-bottom:5px;font-weight:600}
+    .kv{font-family:'Space Mono',monospace;font-size:22px;font-weight:700}
+    .ks{font-size:11px;color:var(--muted);margin-top:2px}
+    .ubar-w{height:4px;background:var(--dark3);border-radius:2px;margin-top:9px;overflow:hidden}
+    .ubar{height:100%;border-radius:2px;background:var(--green);transition:width .5s}
+    .ubar.warn{background:var(--yellow)}.ubar.danger{background:var(--red)}
+
+    /* PLAN CARD */
+    .pcard{background:var(--dark2);border:1px solid var(--border);border-radius:10px;
+      padding:16px 18px;margin-bottom:18px}
+    .sttl{font-size:10px;text-transform:uppercase;letter-spacing:1.4px;color:var(--muted);
+      margin-bottom:11px;font-weight:600;display:flex;align-items:center;
+      justify-content:space-between;gap:8px;flex-wrap:wrap}
+    .scroll-x{overflow-x:auto}
+    .ptbl{width:100%;border-collapse:collapse;font-size:11px}
+    .ptbl th{padding:5px 6px;text-align:center;font-size:9px;text-transform:uppercase;
+      letter-spacing:.6px;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+    .ptbl th.nc{text-align:left;min-width:110px;position:sticky;left:0;background:var(--dark2);z-index:2}
+    .ptbl th.tc{min-width:190px;text-align:left}
+    .ptbl td{padding:4px 4px;text-align:center;border-bottom:1px solid rgba(48,54,61,.3);vertical-align:middle}
+    .ptbl td.nc{text-align:left;padding-left:8px;font-weight:600;font-size:12px;
+      white-space:nowrap;position:sticky;left:0;background:var(--dark2);z-index:1}
+    .ptbl td.tc{text-align:left;padding:3px 5px}
+    .ptbl tr:last-child td{border-bottom:none}
+    .ptbl tr:hover td{background:rgba(255,255,255,.016)}
+    .ptbl tr:hover td.nc{background:var(--dark2)}
+    .csel{background:var(--dark3);border:1px solid var(--border);color:var(--muted);
+      padding:2px 2px;border-radius:4px;font-size:10px;width:60px;cursor:pointer;transition:.1s}
+    .tot-c{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);white-space:nowrap}
+    .task-inp{width:100%;background:transparent;border:1px solid transparent;color:var(--text);
+      padding:4px 6px;border-radius:4px;font-size:11px;resize:none;min-height:30px;
+      line-height:1.4;transition:.15s}
+    .task-inp:hover{border-color:var(--border2);background:var(--dark3)}
+    .task-inp:focus{border-color:var(--green);background:var(--dark3);outline:none}
+    .task-inp::placeholder{color:var(--muted2);font-style:italic}
+
+    /* BOTTOM */
+    .g2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+    .card{background:var(--dark2);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+    .prow{display:grid;grid-template-columns:145px 1fr 60px 68px;align-items:center;
+      gap:9px;padding:7px 0;border-bottom:1px solid var(--border)}
+    .prow:last-child{border-bottom:none}
+    .ppill{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
+    .pdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .pbb{height:5px;background:var(--dark3);border-radius:3px;overflow:hidden}
+    .pbf{height:100%;border-radius:3px;transition:width .5s}
+    .ph{font-family:'Space Mono',monospace;font-size:11px;text-align:right}
+    .ppc{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);text-align:right}
+    .rtbl{width:100%;border-collapse:collapse}
+    .rtbl th{font-size:10px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);
+      font-weight:600;padding:5px 7px;border-bottom:1px solid var(--border);text-align:left}
+    .rtbl th.r{text-align:right}
+    .rtbl td{padding:6px 7px;font-size:12px;border-bottom:1px solid rgba(48,54,61,.3)}
+    .rtbl tr:last-child td{border-bottom:none}
+    .rtbl td.r{text-align:right;font-family:'Space Mono',monospace;font-size:11px}
+    .chip{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;
+      font-size:10px;font-family:'Space Mono',monospace;font-weight:700}
+    .chip.good{background:rgba(46,204,113,.15);color:var(--green)}
+    .chip.warn{background:rgba(244,197,66,.15);color:var(--yellow)}
+    .chip.over{background:rgba(235,87,87,.15);color:var(--red)}
+    .chip.low{background:rgba(139,148,158,.1);color:var(--muted)}
+
+    /* AGGREGATE */
+    .ahead{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+    .ptabs{display:flex;gap:5px}
+    .pt{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--dark3);
+      color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+    .pt.on{background:var(--green);border-color:var(--green);color:var(--dark)}
+    .pt:hover:not(.on){color:var(--text)}
+    .msel2{background:var(--dark3);border:1px solid var(--border2);color:var(--text);
+      padding:5px 8px;border-radius:6px;font-size:12px}
+    .akgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+    .wtrend{display:flex;gap:6px;align-items:flex-end;height:80px;padding:0 2px}
+    .wtb{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px}
+    .wtbar{width:100%;border-radius:2px 2px 0 0;background:var(--green);min-height:3px;transition:height .4s}
+    .wtlbl{font-size:8px;color:var(--muted);text-align:center;white-space:nowrap}
+    .wtpct{font-size:8px;font-family:'Space Mono',monospace;color:var(--muted2)}
+    .es{color:var(--muted);font-size:12px;padding:14px 0;text-align:center}
+
+    /* MODALS */
+    .mbg{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;display:flex;
+      align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:.18s}
+    .mbg.open{opacity:1;pointer-events:auto}
+    .modal{background:var(--dark2);border:1px solid var(--border2);border-radius:12px;
+      padding:24px 24px 18px;width:460px;max-width:95vw;transform:translateY(10px);
+      transition:.18s;max-height:88vh;overflow-y:auto}
+    .mbg.open .modal{transform:translateY(0)}
+    .mttl{font-size:15px;font-weight:700;margin-bottom:16px;display:flex;
+      align-items:center;justify-content:space-between}
+    .mcls{background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;
+      padding:2px 5px;border-radius:4px}
+    .mcls:hover{color:var(--text);background:var(--dark3)}
+    .frow{margin-bottom:12px}
+    .flbl{font-size:11px;color:var(--muted);margin-bottom:4px;display:block;font-weight:500}
+    .finp{width:100%;background:var(--dark3);border:1px solid var(--border2);color:var(--text);
+      padding:7px 10px;border-radius:7px;font-size:13px;outline:none;transition:.15s}
+    .finp:focus{border-color:var(--green)}
+    .cswrap{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+    .csw{width:22px;height:22px;border-radius:5px;cursor:pointer;border:2px solid transparent;transition:.1s}
+    .csw.on{border-color:#fff;transform:scale(1.18)}
+    .mact{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+    .bc{padding:6px 14px;border-radius:6px;border:1px solid var(--border2);
+      background:var(--dark3);color:var(--text);font-size:12px;font-weight:600}
+    .bc:hover{background:var(--dark4)}
+    .bs{padding:6px 14px;border-radius:6px;border:none;background:var(--green);
+      color:var(--dark);font-size:12px;font-weight:700}
+    .bs:hover{background:var(--green-d)}
+    .lmgr{display:flex;flex-direction:column;gap:5px;max-height:200px;overflow-y:auto;margin-bottom:10px}
+    .li{display:flex;align-items:center;gap:7px;padding:6px 8px;background:var(--dark3);
+      border-radius:6px;border:1px solid var(--border)}
+    .lidot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .liname{flex:1;font-size:12px;font-weight:500}
+    .licode{font-size:10px;font-family:'Space Mono',monospace;color:var(--muted);margin-right:4px}
+    .lidel{background:none;border:none;color:var(--red);opacity:.4;font-size:12px;cursor:pointer;padding:2px 4px;border-radius:3px}
+    .lidel:hover{opacity:1}
+    .tog{position:relative;width:34px;height:18px;flex-shrink:0}
+    .tog input{opacity:0;width:0;height:0;position:absolute}
+    .tog-sl{position:absolute;inset:0;background:var(--dark4);border-radius:9px;cursor:pointer;transition:.2s;border:1px solid var(--border2)}
+    .tog input:checked+.tog-sl{background:var(--green);border-color:var(--green)}
+    .tog-sl::before{content:'';position:absolute;width:12px;height:12px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s}
+    .tog input:checked+.tog-sl::before{transform:translateX(16px)}
+    .divline{border:none;border-top:1px solid var(--border);margin:12px 0}
+    .sublbl{font-size:10px;color:var(--muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px}
+    .tag-inactive{font-size:9px;background:rgba(139,148,158,.15);color:var(--muted);padding:1px 5px;border-radius:3px;margin-left:4px}
+
+    /* TOAST */
+    #saveToast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
+      background:var(--red);color:#fff;padding:10px 18px;border-radius:8px;
+      font-size:13px;font-weight:600;z-index:999;display:none;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+
+    .footer{background:var(--dark2);border-top:1px solid var(--border);padding:8px 24px;
+      font-size:10px;color:var(--muted);display:flex;align-items:center;
+      justify-content:space-between;margin-top:24px}
+  </style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+  <div class="loading-txt" id="loadingMsg">Connecting to Powermatix cloud…</div>
+</div>
+
+<!-- HEADER -->
+<header class="hdr">
+  <div class="logo">
+    <div class="lmark">PM</div>
+    <div>
+      <div class="lname">Power<em>matix</em></div>
+      <div class="lsub">Resource Allocation Tracker · 2026+</div>
+    </div>
+  </div>
+  <div class="hdr-r">
+    <div class="cfg-row">
+      <label>hrs/day</label>
+      <input type="number" class="cfg-inp" id="hrsInp" value="8" min="1" max="24" onchange="onCfgChange()">
+    </div>
+    <div class="cfg-row">
+      <label>days/week</label>
+      <select class="cfg-sel" id="daysInp" onchange="onCfgChange()">
+        <option value="5">5 (Mon–Fri)</option>
+        <option value="6" selected>6 (Mon–Sat)</option>
+      </select>
+    </div>
+    <button class="hbtn" onclick="openModal('projModal')">＋ Project</button>
+    <button class="hbtn" onclick="openModal('resModal')">＋ Resource</button>
+    <a href="/attendance/index.html" class="hbtn att">✓ Attendance</a>
+    <button class="hbtn g" id="saveBtn" onclick="doManualSave()">💾 Save</button>
+    <div class="user-info">
+      <div class="user-avatar" id="userAvatar">?</div>
+      <span id="userName" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+      <button class="signout" onclick="handleSignOut()">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<!-- TABS -->
+<div class="tabs">
+  <button class="tbtn on" onclick="switchTab('weekly',this)">Weekly Plan</button>
+  <button class="tbtn" onclick="switchTab('aggregate',this)">Monthly / Quarterly KPIs</button>
+</div>
+
+<div class="main">
+
+  <!-- WEEKLY PANE -->
+  <div class="pane on" id="pane-weekly">
+    <div class="wnav">
+      <button class="wnarr" onclick="shiftWeek(-1)">‹</button>
+      <div class="wlbl" id="wLbl">—</div>
+      <button class="wnarr" onclick="shiftWeek(1)">›</button>
+      <span class="wbadge" id="wBadge">Current Week</span>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        <select class="wyear-sel" id="yearSel" onchange="onYearChange()"></select>
+        <select class="wweek-sel" id="weekSel" onchange="onWeekSelChange()"></select>
+      </div>
+    </div>
+    <div class="kgrid" id="kgrid"></div>
+    <div class="pcard">
+      <div class="sttl">
+        <span>Allocation Grid — project assignment per day</span>
+        <span id="planNote" style="font-weight:400;font-size:10px;color:var(--muted)"></span>
+      </div>
+      <div class="scroll-x"><table class="ptbl" id="planTbl"></table></div>
+    </div>
+    <div class="g2">
+      <div class="card"><div class="sttl">Project Breakdown</div><div id="projBreak"></div></div>
+      <div class="card">
+        <div class="sttl">Resource Utilization</div>
+        <table class="rtbl">
+          <thead><tr><th>Resource</th><th class="r">Alloc</th><th class="r">Avail</th><th class="r">Util%</th></tr></thead>
+          <tbody id="resTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- AGGREGATE PANE -->
+  <div class="pane" id="pane-aggregate">
+    <div class="ahead">
+      <div class="ptabs">
+        <button class="pt on" onclick="setPeriod('month',this)">Month</button>
+        <button class="pt" onclick="setPeriod('quarter',this)">Quarter</button>
+      </div>
+      <select class="msel2" id="periodSel" onchange="renderAggregate()"></select>
+      <span style="font-size:11px;color:var(--muted)" id="aggInfo"></span>
+    </div>
+    <div class="akgrid" id="aggKpi"></div>
+    <div class="g2">
+      <div class="card"><div class="sttl">Weekly Utilization Trend</div><div id="wTrend"></div></div>
+      <div class="card"><div class="sttl">Project Hours Distribution</div><div id="aggProj"></div></div>
+    </div>
+    <div class="card" style="margin-bottom:18px">
+      <div class="sttl">Resource Summary</div>
+      <table class="rtbl">
+        <thead><tr><th>Resource</th><th class="r">Total Alloc h</th><th class="r">Total Avail h</th><th class="r">Avg Util%</th><th class="r">Top Project</th></tr></thead>
+        <tbody id="aggResTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <span>Powermatix · Technology Value Creation</span>
+  <span id="footNote"></span>
+</div>
+
+<!-- TOAST -->
+<div id="saveToast">⚠ Auto-save failed — check connection</div>
+
+<!-- PROJECT MODAL -->
+<div class="mbg" id="projModal">
+  <div class="modal">
+    <div class="mttl">Manage Projects <button class="mcls" onclick="closeModal('projModal')">×</button></div>
+    <div class="lmgr" id="projList"></div>
+    <hr class="divline">
+    <div class="sublbl">Add New Project</div>
+    <div class="frow"><label class="flbl">Code (e.g. KB, WF)</label><input class="finp" id="nPC" placeholder="2–6 chars" maxlength="6"></div>
+    <div class="frow"><label class="flbl">Full Name</label><input class="finp" id="nPN" placeholder="Project label"></div>
+    <div class="frow"><label class="flbl">Color</label><div class="cswrap" id="cswrap"></div></div>
+    <div class="mact">
+      <button class="bc" onclick="closeModal('projModal')">Close</button>
+      <button class="bs" onclick="addProject()">Add Project</button>
+    </div>
+  </div>
+</div>
+
+<!-- RESOURCE MODAL -->
+<div class="mbg" id="resModal">
+  <div class="modal">
+    <div class="mttl">Manage Resources <button class="mcls" onclick="closeModal('resModal')">×</button></div>
+    <div class="lmgr" id="resList"></div>
+    <hr class="divline">
+    <div class="sublbl">Add New Resource</div>
+    <div class="frow"><label class="flbl">Full Name</label><input class="finp" id="nRN" placeholder="e.g. Ali Hassan"></div>
+    <div class="mact">
+      <button class="bc" onclick="closeModal('resModal')">Close</button>
+      <button class="bs" onclick="addResource()">Add Resource</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  SUPABASE CONFIG  — replace with your actual values
+// ════════════════════════════════════════════════════════════
+const SUPABASE_URL  = 'https://hrdkulmzlphkewraafmi.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_xzUWcC8k_OMShmJ_HvxP1g_JoJVyJeH';
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_ANON, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+});
+
+// ════════════════════════════════════════════════════════════
+//  IN-MEMORY STATE  (same structure as before)
+// ════════════════════════════════════════════════════════════
+const PALETTE = ['#2ECC71','#F4C542','#F4934A','#E056A0','#56CCF2','#9B51E0',
+  '#2F80ED','#6FCF97','#EB5757','#F2994A','#BB86FC','#219653','#FF6B6B','#4ECDC4','#45B7D1','#FFD166'];
+
+let PROJECTS = {};   // code → {label,color,active}
+let RESOURCES = [];  // [{name, active}]
+let weekData  = {};  // mondayStr → {alloc:{name:[p0…p5]}, tasks:{name:'...'}}
+
+let hrsPerDay   = 8;
+let daysPerWeek = 6;
+let currentMon  = '2026-01-05';
+let aggPeriod   = 'month';
+let selColor    = PALETTE[1];
+let currentUser = null;
+
+// ════════════════════════════════════════════════════════════
+//  DATE UTILS  (identical to original — do not change)
+// ════════════════════════════════════════════════════════════
+function pad2(n){ return String(n).padStart(2,'0'); }
+function dateObj(s){ return new Date(s+'T12:00:00'); }
+function dateToStr(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+function addDays(s,n){ const d=dateObj(s); d.setDate(d.getDate()+n); return dateToStr(d); }
+function isoMonday(s){ const d=dateObj(s),day=d.getDay(); d.setDate(d.getDate()+(day===0?-6:1-day)); return dateToStr(d); }
+function fmt(s){ return dateObj(s).toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
+function getYear(s){ return dateObj(s).getFullYear(); }
+function getMonth(s){ return dateObj(s).getMonth(); }
+function dayName(di){ return ['Mon','Tue','Wed','Thu','Fri','Sat'][di]; }
+function getWeekDays(mon){ const out=[]; for(let i=0;i<daysPerWeek;i++) out.push({name:dayName(i),date:addDays(mon,i)}); return out; }
+function activeRes(){ return RESOURCES.filter(r=>r.active); }
+function getHrs(){ return hrsPerDay; }
+function getDays(){ return daysPerWeek; }
+function esc(s){ return s.replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+function autoResize(el){ el.style.height='auto'; el.style.height=Math.max(30,el.scrollHeight)+'px'; }
+
+// ════════════════════════════════════════════════════════════
+//  YEAR / WEEK SELECTORS
+// ════════════════════════════════════════════════════════════
+function buildYearSel(){
+  const sel=document.getElementById('yearSel');
+  const end=Math.max(new Date().getFullYear()+2,2029);
+  let html=''; for(let y=2026;y<=end;y++) html+=`<option value="${y}">${y}</option>`;
+  sel.innerHTML=html;
+}
+function getMondaysOfYear(year){
+  const out=[]; let d=new Date(year,0,1,12,0,0);
+  while(d.getDay()!==1) d.setDate(d.getDate()+1);
+  while(d.getFullYear()===year){ out.push(dateToStr(d)); d.setDate(d.getDate()+7); }
+  return out;
+}
+function buildWeekSel(year){
+  const sel=document.getElementById('weekSel');
+  const mondays=getMondaysOfYear(year);
+  sel.innerHTML=mondays.map((m,i)=>{
+    const end=addDays(m,daysPerWeek-1);
+    return `<option value="${m}">W${String(i+1).padStart(2,'0')}: ${fmt(m)} – ${fmt(end)}</option>`;
+  }).join('');
+}
+function syncYearWeekSelectors(){
+  currentMon=isoMonday(currentMon);
+  const ySel=document.getElementById('yearSel');
+  const wSel=document.getElementById('weekSel');
+  const year=getYear(currentMon);
+  if(year>=2026){
+    ySel.value=year; buildWeekSel(year); wSel.value=currentMon;
+    if(!wSel.value){
+      const opts=Array.from(wSel.options); let best=0,bestD=Infinity;
+      const t=dateObj(currentMon).getTime();
+      opts.forEach((o,i)=>{ const d=Math.abs(dateObj(o.value).getTime()-t); if(d<bestD){bestD=d;best=i;} });
+      wSel.selectedIndex=best; currentMon=wSel.value||currentMon;
+    }
+  }
+}
+function onYearChange(){
+  const year=parseInt(document.getElementById('yearSel').value);
+  buildWeekSel(year);
+  const m=getMondaysOfYear(year); currentMon=m[0]||currentMon;
+  document.getElementById('weekSel').value=currentMon;
+  loadWeekAndRender(currentMon);
+}
+async function onWeekSelChange(){
+  currentMon=isoMonday(document.getElementById('weekSel').value);
+  await loadWeekAndRender(currentMon);
+}
+
+// ════════════════════════════════════════════════════════════
+//  WEEK DATA ACCESS (in-memory)
+// ════════════════════════════════════════════════════════════
+function getWD(mon){
+  if(!weekData[mon]) weekData[mon]={alloc:{},tasks:{}};
+  const wd=weekData[mon];
+  if(!wd.alloc) wd.alloc={}; if(!wd.tasks) wd.tasks={};
+  RESOURCES.forEach(r=>{
+    if(!wd.alloc[r.name]) wd.alloc[r.name]=Array(daysPerWeek).fill('');
+    while(wd.alloc[r.name].length<daysPerWeek) wd.alloc[r.name].push('');
+    if(wd.tasks[r.name]===undefined) wd.tasks[r.name]='';
+  });
+  return wd;
+}
+
+// ════════════════════════════════════════════════════════════
+//  CLOUD — LOAD PROJECTS
+// ════════════════════════════════════════════════════════════
+async function loadProjectsFromCloud(){
+  const {data,error}=await db.from('tracker_projects').select('*').order('code');
+  if(error){ console.error('[projects]',error.message); return; }
+  PROJECTS={};
+  data.forEach(p=>{ PROJECTS[p.code]={label:p.label,color:p.color,active:p.is_active}; });
+  PROJECTS['LEAVE']={label:'On Leave',color:'#EB5757',active:true};
+  PROJECTS['']     ={label:'Available',color:'#6E7681',active:true};
+}
+
+// ════════════════════════════════════════════════════════════
+//  CLOUD — LOAD RESOURCES
+// ════════════════════════════════════════════════════════════
+async function loadResourcesFromCloud(){
+  const {data,error}=await db.from('tracker_resources').select('*').order('sort_order');
+  if(error){ console.error('[resources]',error.message); return; }
+  RESOURCES=data.map(r=>({name:r.name,active:r.is_active}));
+}
+
+// ════════════════════════════════════════════════════════════
+//  CLOUD — LOAD WEEK ALLOCATIONS + NOTES
+// ════════════════════════════════════════════════════════════
+async function loadWeekFromCloud(mon){
+  const [allocRes,notesRes]=await Promise.all([
+    db.from('tracker_allocations').select('resource_name,day_index,project_code').eq('week_monday',mon),
+    db.from('tracker_notes').select('resource_name,notes').eq('week_monday',mon)
+  ]);
+  const dpw=daysPerWeek;
+  // init empty
+  const alloc={},tasks={};
+  RESOURCES.forEach(r=>{ alloc[r.name]=Array(dpw).fill(''); tasks[r.name]=''; });
+  // fill allocations
+  if(!allocRes.error && allocRes.data){
+    allocRes.data.forEach(row=>{
+      if(alloc[row.resource_name]!==undefined && row.day_index<dpw)
+        alloc[row.resource_name][row.day_index]=row.project_code||'';
+    });
+  }
+  // fill notes
+  if(!notesRes.error && notesRes.data){
+    notesRes.data.forEach(row=>{ if(tasks[row.resource_name]!==undefined) tasks[row.resource_name]=row.notes||''; });
+  }
+  weekData[mon]={alloc,tasks};
+}
+
+async function loadWeekAndRender(mon){
+  setLoadingMsg('Loading week…');
+  showWeekLoading(true);
+  await loadWeekFromCloud(mon);
+  showWeekLoading(false);
+  renderWeekly();
+}
+
+function showWeekLoading(on){
+  const el=document.getElementById('planTbl');
+  if(on && el) el.style.opacity='.4';
+  else if(el) el.style.opacity='1';
+}
+
+// ════════════════════════════════════════════════════════════
+//  CLOUD — LOAD ORG SETTINGS
+// ════════════════════════════════════════════════════════════
+async function loadOrgSettings(){
+  const {data,error}=await db.from('org_settings').select('key,value');
+  if(error) return;
+  const s=Object.fromEntries(data.map(r=>[r.key,r.value]));
+  hrsPerDay  =parseInt(s.hrs_per_day||'8');
+  daysPerWeek=parseInt(s.days_per_week||'6');
+  document.getElementById('hrsInp').value=hrsPerDay;
+  document.getElementById('daysInp').value=daysPerWeek;
+}
+async function saveOrgSettings(){
+  await db.from('org_settings').upsert([
+    {key:'hrs_per_day',  value:String(hrsPerDay)},
+    {key:'days_per_week',value:String(daysPerWeek)},
+  ],{onConflict:'key'});
+}
+
+// ════════════════════════════════════════════════════════════
+//  CLOUD — SAVE CELL  (auto-save on every change)
+// ════════════════════════════════════════════════════════════
+async function saveCellToCloud(mon, resName, dayIndex, projCode){
+  setSaveStatus('saving');
+  if(projCode){
+    const {error}=await db.from('tracker_allocations').upsert({
+      week_monday:mon, resource_name:resName, day_index:dayIndex, project_code:projCode
+    },{onConflict:'week_monday,resource_name,day_index'});
+    if(error){ setSaveStatus('error'); showToast(); return; }
+  } else {
+    const {error}=await db.from('tracker_allocations').delete()
+      .match({week_monday:mon,resource_name:resName,day_index:dayIndex});
+    if(error){ setSaveStatus('error'); showToast(); return; }
+  }
+  setSaveStatus('ok');
+}
+
+// ════════════════════════════════════════════════════════════
+//  CLOUD — SAVE TASK NOTE  (debounced)
+// ════════════════════════════════════════════════════════════
+const _noteTimers={};
+async function saveTaskNoteToCloud(mon, resName, notesText){
+  clearTimeout(_noteTimers[resName]);
+  _noteTimers[resName]=setTimeout(async()=>{
+    setSaveStatus('saving');
+    if(notesText && notesText.trim()){
+      const {error}=await db.from('tracker_notes').upsert(
+        {week_monday:mon,resource_name:resName,notes:notesText.trim()},
+        {onConflict:'week_monday,resource_name'}
+      );
+      if(error){ setSaveStatus('error'); return; }
+    } else {
+      await db.from('tracker_notes').delete().match({week_monday:mon,resource_name:resName});
+    }
+    setSaveStatus('ok');
+  },800);
+}
+
+// ════════════════════════════════════════════════════════════
+//  SAVE STATUS  (live indicator in header)
+// ════════════════════════════════════════════════════════════
+let _saveStatusEl=null;
+function setSaveStatus(state){
+  if(!_saveStatusEl){
+    _saveStatusEl=document.createElement('div');
+    _saveStatusEl.className='save-status';
+    _saveStatusEl.innerHTML='<div class="save-dot" id="saveDot"></div><span id="saveTxt">Saved</span>';
+    document.querySelector('.hdr-r').insertBefore(_saveStatusEl,document.getElementById('saveBtn'));
+  }
+  const dot=document.getElementById('saveDot');
+  const txt=document.getElementById('saveTxt');
+  if(state==='saving'){ dot.className='save-dot saving'; txt.textContent='Saving…'; }
+  else if(state==='ok')  { dot.className='save-dot'; txt.textContent='Saved'; }
+  else                   { dot.className='save-dot error'; txt.textContent='Save failed'; }
+}
+function showToast(){
+  const t=document.getElementById('saveToast');
+  t.style.display='block'; setTimeout(()=>t.style.display='none',4000);
+}
+function setLoadingMsg(msg){ const el=document.getElementById('loadingMsg'); if(el) el.textContent=msg; }
+
+// ════════════════════════════════════════════════════════════
+//  RENDER WEEKLY  (identical rendering logic, cloud-backed data)
+// ════════════════════════════════════════════════════════════
+function renderWeekly(){
+  currentMon=isoMonday(currentMon);
+  const mon=currentMon, days=getWeekDays(mon), wd=getWD(mon);
+  const hrs=getHrs(), dpw=getDays();
+  const todayStr=dateToStr(new Date());
+  const isCur=days.some(d=>d.date===todayStr);
+
+  document.getElementById('wLbl').textContent=`${fmt(days[0].date)} – ${fmt(days[dpw-1].date)}, ${getYear(mon)}`;
+  document.getElementById('wBadge').classList.toggle('show',isCur);
+  document.getElementById('footNote').textContent=`${hrs}h/day · ${dpw} working days`;
+  document.getElementById('planNote').textContent=`${hrs}h/day · ${dpw} days`;
+
+  const aRes=activeRes(), totalR=aRes.length, totAvail=totalR*dpw*hrs;
+  let allH=0,lvH=0; const projH={};
+  aRes.forEach(r=>{
+    (wd.alloc[r.name]||[]).slice(0,dpw).forEach(p=>{
+      if(p&&p!=='LEAVE'){projH[p]=(projH[p]||0)+hrs;allH+=hrs;}
+      else if(p==='LEAVE') lvH+=hrs;
+    });
+  });
+  const util=totAvail>0?Math.round(allH/totAvail*100):0;
+  const unalloc=totAvail-allH-lvH;
+
+  // KPIs
+  document.getElementById('kgrid').innerHTML=[
+    {l:'Active Resources',v:totalR,     s:'in report',               a:'#56CCF2'},
+    {l:'Capacity',        v:totAvail+'h',s:`${totalR}×${dpw}d×${hrs}h`,a:'#8B949E'},
+    {l:'Allocated',       v:allH+'h',   s:'on active projects',      a:'#F4934A'},
+    {l:'Unallocated',     v:unalloc+'h',s:'free capacity',           a:'#2ECC71'},
+    {l:'Utilization',     v:util+'%',   s:'of total capacity',       a:util>90?'#EB5757':util>70?'#F4C542':'#2ECC71',u:util},
+  ].map(k=>`<div class="kpi" style="--acc:${k.a}">
+    <div class="kl">${k.l}</div><div class="kv">${k.v}</div><div class="ks">${k.s}</div>
+    ${k.u!==undefined?`<div class="ubar-w"><div class="ubar ${k.u>90?'danger':k.u>70?'warn':''}" style="width:${k.u}%"></div></div>`:''}
+  </div>`).join('');
+
+  // active project keys for dropdowns
+  const aProjKeys=['', ...Object.keys(PROJECTS).filter(k=>k&&k!=='LEAVE'&&PROJECTS[k].active), 'LEAVE'];
+
+  const thead=`<thead><tr>
+    <th class="nc">Resource</th>
+    ${days.map(d=>`<th>${d.name}<br><span style="font-size:8px;opacity:.5">${fmt(d.date)}</span></th>`).join('')}
+    <th>Total</th><th class="tc">Weekly Tasks / Notes</th>
+  </tr></thead>`;
+
+  const tbody=aRes.map(r=>{
+    const row=(wd.alloc[r.name]||[]).slice(0,dpw);
+    const cells=row.map((p,di)=>{
+      const col=(PROJECTS[p]||PROJECTS['']).color;
+      return `<td><select class="csel" style="background:${p?col+'22':'var(--dark3)'};color:${p?col:'var(--muted2)'};border-color:${p?col:'var(--border)'};"
+        onchange="setCell('${esc(r.name)}',${di},this)">
+        ${aProjKeys.map(k=>`<option value="${k}"${k===p?' selected':''}>${k||'—'}</option>`).join('')}
+      </select></td>`;
+    }).join('');
+    const ah=row.filter(p=>p&&p!=='LEAVE').length*hrs;
+    const task=(wd.tasks[r.name]||'');
+    return `<tr>
+      <td class="nc">${r.name}</td>${cells}
+      <td class="tot-c">${ah}h</td>
+      <td class="tc"><textarea class="task-inp" rows="1" placeholder="Enter tasks / notes for this week…"
+        onchange="setTask('${esc(r.name)}',this.value)"
+        oninput="autoResize(this)">${task}</textarea></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('planTbl').innerHTML=thead+`<tbody>${tbody}</tbody>`;
+  document.querySelectorAll('.task-inp').forEach(autoResize);
+
+  // Project breakdown
+  const sorted=Object.entries(projH).filter(([c])=>PROJECTS[c]&&PROJECTS[c].active).sort((a,b)=>b[1]-a[1]);
+  const maxH=sorted[0]?.[1]||1;
+  document.getElementById('projBreak').innerHTML=sorted.length
+    ?sorted.map(([c,h])=>{
+      const p=PROJECTS[c]||{label:c,color:'#8B949E'};
+      return `<div class="prow">
+        <div class="ppill"><div class="pdot" style="background:${p.color}"></div>${p.label}</div>
+        <div class="pbb"><div class="pbf" style="width:${h/maxH*100}%;background:${p.color}"></div></div>
+        <div class="ph">${h}h</div><div class="ppc">${totAvail>0?Math.round(h/totAvail*100):0}%</div>
+      </div>`;
+    }).join('')
+    :'<div class="es">No allocations this week</div>';
+
+  // Resource util
+  document.getElementById('resTbody').innerHTML=aRes.map(r=>{
+    const row=(wd.alloc[r.name]||[]).slice(0,dpw);
+    const ah=row.filter(p=>p&&p!=='LEAVE').length*hrs;
+    const av=dpw*hrs, u=Math.round(ah/av*100);
+    const cl=u>=100?'over':u>=60?'good':u>0?'warn':'low';
+    return `<tr><td>${r.name}</td><td class="r">${ah}h</td><td class="r">${av}h</td>
+      <td class="r"><span class="chip ${cl}">${u}%</span></td></tr>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════════
+//  CELL & TASK SETTERS  (update memory + cloud)
+// ════════════════════════════════════════════════════════════
+function setCell(res, di, sel){
+  const wd=getWD(currentMon);
+  if(!wd.alloc[res]) wd.alloc[res]=Array(daysPerWeek).fill('');
+  wd.alloc[res][di]=sel.value;
+  const p=PROJECTS[sel.value]||PROJECTS[''];
+  sel.style.background=sel.value?p.color+'22':'var(--dark3)';
+  sel.style.color=sel.value?p.color:'var(--muted2)';
+  sel.style.borderColor=sel.value?p.color:'var(--border)';
+  renderWeekly();
+  saveCellToCloud(currentMon,res,di,sel.value);
+}
+
+function setTask(res, val){
+  const wd=getWD(currentMon);
+  wd.tasks[res]=val;
+  saveTaskNoteToCloud(currentMon,res,val);
+}
+
+// ════════════════════════════════════════════════════════════
+//  WEEK NAVIGATION
+// ════════════════════════════════════════════════════════════
+async function shiftWeek(dir){
+  currentMon=isoMonday(addDays(currentMon,dir*7));
+  syncYearWeekSelectors();
+  await loadWeekAndRender(currentMon);
+}
+
+function onCfgChange(){
+  hrsPerDay=parseFloat(document.getElementById('hrsInp').value)||8;
+  daysPerWeek=parseInt(document.getElementById('daysInp').value)||6;
+  saveOrgSettings();
+  renderWeekly(); renderAggregate();
+}
+
+// ════════════════════════════════════════════════════════════
+//  AGGREGATE
+// ════════════════════════════════════════════════════════════
+function setPeriod(p,btn){
+  aggPeriod=p;
+  document.querySelectorAll('.pt').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  populatePeriodSel(); renderAggregate();
+}
+
+function populatePeriodSel(){
+  const sel=document.getElementById('periodSel');
+  const weeks=Object.keys(weekData).filter(w=>getYear(w)>=2026).sort();
+  if(!weeks.length){sel.innerHTML='<option>No data yet</option>';return;}
+  const opts=new Set();
+  weeks.forEach(w=>{
+    const d=dateObj(w);
+    if(aggPeriod==='month') opts.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+    else opts.add(`${d.getFullYear()}-Q${Math.ceil((d.getMonth()+1)/3)}`);
+  });
+  sel.innerHTML=Array.from(opts).sort().reverse().map(o=>`<option value="${o}">${o}</option>`).join('');
+}
+
+function renderAggregate(){
+  const sel=document.getElementById('periodSel').value;
+  if(!sel||sel==='No data yet'){
+    document.getElementById('aggKpi').innerHTML='<div class="es" style="grid-column:1/-1">Plan at least one week to see aggregates.</div>';
+    return;
+  }
+  const mw=Object.keys(weekData).filter(w=>{
+    const d=dateObj(w);
+    if(aggPeriod==='month') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`===sel;
+    return `${d.getFullYear()}-Q${Math.ceil((d.getMonth()+1)/3)}`===sel;
+  }).sort();
+  const hrs=getHrs(),dpw=getDays(),aRes=activeRes();
+  let totA=0,totAlloc=0; const projH={},resH={},resAv={},wUtils=[];
+  mw.forEach(wk=>{
+    const wd=weekData[wk]||{alloc:{},tasks:{}};
+    let wkA=0; const wkAvail=aRes.length*dpw*hrs;
+    aRes.forEach(r=>{
+      if(!resH[r.name]) resH[r.name]=0;
+      if(!resAv[r.name]) resAv[r.name]=0;
+      resAv[r.name]+=dpw*hrs;
+      ((wd.alloc||{})[r.name]||[]).slice(0,dpw).forEach(p=>{
+        if(p&&p!=='LEAVE'){projH[p]=(projH[p]||0)+hrs;resH[r.name]+=hrs;wkA+=hrs;totAlloc+=hrs;}
+      });
+    });
+    totA+=wkAvail; wUtils.push({wk,util:wkAvail>0?Math.round(wkA/wkAvail*100):0});
+  });
+  const util=totA>0?Math.round(totAlloc/totA*100):0;
+  document.getElementById('aggInfo').textContent=`${mw.length} week${mw.length!==1?'s':''} · ${aRes.length} active resources`;
+  document.getElementById('aggKpi').innerHTML=[
+    {l:'Weeks Tracked',  v:mw.length,    s:`in ${sel}`,              a:'#56CCF2'},
+    {l:'Total Capacity', v:totA+'h',     s:`${aRes.length} resources`,a:'#8B949E'},
+    {l:'Total Allocated',v:totAlloc+'h', s:'on active projects',     a:'#F4934A'},
+    {l:'Avg Utilization',v:util+'%',     s:'of total capacity',      a:util>90?'#EB5757':util>70?'#F4C542':'#2ECC71',u:util},
+  ].map(k=>`<div class="kpi" style="--acc:${k.a}">
+    <div class="kl">${k.l}</div><div class="kv">${k.v}</div><div class="ks">${k.s}</div>
+    ${k.u!==undefined?`<div class="ubar-w"><div class="ubar ${k.u>90?'danger':k.u>70?'warn':''}" style="width:${k.u}%"></div></div>`:''}
+  </div>`).join('');
+  const mx=Math.max(...wUtils.map(w=>w.util),1);
+  document.getElementById('wTrend').innerHTML=wUtils.length
+    ?`<div class="wtrend">${wUtils.map(w=>{
+      const h=Math.max(Math.round(w.util/mx*62),3);
+      const col=w.util>=80?'var(--green)':w.util>=50?'var(--yellow)':'var(--muted)';
+      return `<div class="wtb"><div class="wtpct">${w.util}%</div>
+        <div class="wtbar" style="height:${h}px;background:${col}"></div>
+        <div class="wtlbl">${fmt(w.wk)}</div></div>`;
+    }).join('')}</div>`
+    :'<div class="es">No data</div>';
+  const sp=Object.entries(projH).filter(([c])=>PROJECTS[c]&&PROJECTS[c].active).sort((a,b)=>b[1]-a[1]);
+  const mxP=sp[0]?.[1]||1;
+  document.getElementById('aggProj').innerHTML=sp.length
+    ?sp.map(([c,h])=>{
+      const p=PROJECTS[c]||{label:c,color:'#8B949E'};
+      return `<div class="prow">
+        <div class="ppill"><div class="pdot" style="background:${p.color}"></div>${p.label}</div>
+        <div class="pbb"><div class="pbf" style="width:${h/mxP*100}%;background:${p.color}"></div></div>
+        <div class="ph">${h}h</div><div class="ppc">${totA>0?Math.round(h/totA*100):0}%</div>
+      </div>`;
+    }).join(''):'<div class="es">No allocations in this period</div>';
+  document.getElementById('aggResTbody').innerHTML=aRes.map(r=>{
+    const ah=resH[r.name]||0,av=resAv[r.name]||1,u=Math.round(ah/av*100);
+    const cl=u>=100?'over':u>=60?'good':u>0?'warn':'low';
+    const rp={};
+    mw.forEach(wk=>{ ((weekData[wk]||{}).alloc||{})[r.name]?.slice(0,dpw).forEach(p=>{ if(p&&p!=='LEAVE') rp[p]=(rp[p]||0)+1; }); });
+    const top=Object.entries(rp).sort((a,b)=>b[1]-a[1])[0];
+    const topL=top?(PROJECTS[top[0]]||{label:top[0]}).label:'—';
+    return `<tr><td>${r.name}</td><td class="r">${ah}h</td><td class="r">${av}h</td>
+      <td class="r"><span class="chip ${cl}">${u}%</span></td>
+      <td class="r" style="font-size:10px;color:var(--muted)">${topL}</td></tr>`;
+  }).join('');
+}
+
+async function switchTab(id,btn){
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tbtn').forEach(b=>b.classList.remove('on'));
+  document.getElementById('pane-'+id).classList.add('on');
+  btn.classList.add('on');
+  if(id==='aggregate'){
+    // load all weeks that have allocations for aggregate view
+    const {data}=await db.from('tracker_allocations').select('week_monday');
+    if(data){
+      const weeks=[...new Set(data.map(r=>r.week_monday))];
+      for(const wk of weeks){ if(!weekData[wk]) await loadWeekFromCloud(wk); }
+    }
+    populatePeriodSel(); renderAggregate();
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  MODALS — PROJECTS
+// ════════════════════════════════════════════════════════════
+function openModal(id){
+  if(id==='projModal') refreshProjList();
+  if(id==='resModal') refreshResList();
+  document.getElementById(id).classList.add('open');
+}
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.mbg').forEach(bg=>{
+  bg.addEventListener('click',e=>{ if(e.target===bg) bg.classList.remove('open'); });
+});
+function buildSwatches(){
+  document.getElementById('cswrap').innerHTML=PALETTE.map(c=>
+    `<div class="csw${c===selColor?' on':''}" style="background:${c}" onclick="pickColor('${c}',this)"></div>`
+  ).join('');
+}
+function pickColor(c,el){
+  selColor=c;
+  document.querySelectorAll('.csw').forEach(s=>s.classList.remove('on'));
+  el.classList.add('on');
+}
+function refreshProjList(){
+  buildSwatches();
+  const keys=Object.keys(PROJECTS).filter(k=>k&&k!=='LEAVE'&&k!=='');
+  document.getElementById('projList').innerHTML=keys.length?keys.map(k=>{
+    const p=PROJECTS[k],isA=p.active!==false;
+    return `<div class="li" style="opacity:${isA?1:.55}">
+      <div class="lidot" style="background:${p.color}"></div>
+      <div class="liname">${p.label}${!isA?'<span class="tag-inactive">inactive</span>':''}</div>
+      <div class="licode">${k}</div>
+      <label class="tog"><input type="checkbox" ${isA?'checked':''} onchange="toggleProject('${k}',this.checked)"><span class="tog-sl"></span></label>
+      <button class="lidel" onclick="deleteProject('${k}')">✕</button>
+    </div>`;
+  }).join(''):'<div class="es">No projects yet</div>';
+}
+
+async function toggleProject(code, active){
+  PROJECTS[code].active=active;
+  const {error}=await db.from('tracker_projects').update({is_active:active}).eq('code',code);
+  if(error) console.error('[toggleProject]',error.message);
+  refreshProjList(); renderWeekly();
+}
+
+async function addProject(){
+  const code=document.getElementById('nPC').value.trim().toUpperCase();
+  const name=document.getElementById('nPN').value.trim();
+  if(!code||!name){alert('Enter both a code and name.');return;}
+  if(PROJECTS[code]){alert('Code already exists.');return;}
+  const {error}=await db.from('tracker_projects').insert({code,label:name,color:selColor,is_active:true});
+  if(error){alert('Failed to save project: '+error.message);return;}
+  PROJECTS[code]={label:name,color:selColor,active:true};
+  document.getElementById('nPC').value='';
+  document.getElementById('nPN').value='';
+  refreshProjList(); renderWeekly();
+}
+
+async function deleteProject(code){
+  if(!confirm(`Permanently delete "${PROJECTS[code].label}"?\nTip: use the toggle to deactivate instead.`)) return;
+  const {error}=await db.from('tracker_projects').delete().eq('code',code);
+  if(error){alert('Delete failed: '+error.message);return;}
+  delete PROJECTS[code]; refreshProjList(); renderWeekly();
+}
+
+// ════════════════════════════════════════════════════════════
+//  MODALS — RESOURCES
+// ════════════════════════════════════════════════════════════
+function refreshResList(){
+  document.getElementById('resList').innerHTML=RESOURCES.length?RESOURCES.map((r,i)=>{
+    const isA=r.active!==false;
+    return `<div class="li" style="opacity:${isA?1:.55}">
+      <div class="liname">${r.name}${!isA?'<span class="tag-inactive">inactive</span>':''}</div>
+      <label class="tog"><input type="checkbox" ${isA?'checked':''} onchange="toggleResource(${i},this.checked)"><span class="tog-sl"></span></label>
+      <button class="lidel" onclick="deleteResource(${i})">✕</button>
+    </div>`;
+  }).join(''):'<div class="es">No resources yet</div>';
+}
+
+async function toggleResource(idx, active){
+  const name=RESOURCES[idx].name;
+  RESOURCES[idx].active=active;
+  const {error}=await db.from('tracker_resources').update({is_active:active}).eq('name',name);
+  if(error) console.error('[toggleResource]',error.message);
+  refreshResList(); renderWeekly();
+}
+
+async function addResource(){
+  const name=document.getElementById('nRN').value.trim();
+  if(!name){alert('Enter a name.');return;}
+  if(RESOURCES.find(r=>r.name===name)){alert('Resource already exists.');return;}
+  const sortOrder=RESOURCES.length+1;
+  const {error}=await db.from('tracker_resources').insert({name,is_active:true,sort_order:sortOrder});
+  if(error){alert('Failed to save resource: '+error.message);return;}
+  RESOURCES.push({name,active:true});
+  document.getElementById('nRN').value='';
+  refreshResList(); renderWeekly();
+}
+
+async function deleteResource(idx){
+  const r=RESOURCES[idx];
+  if(!confirm(`Permanently delete "${r.name}"?\nTip: use the toggle to deactivate instead.`)) return;
+  const {error}=await db.from('tracker_resources').delete().eq('name',r.name);
+  if(error){alert('Delete failed: '+error.message);return;}
+  RESOURCES.splice(idx,1); refreshResList(); renderWeekly();
+}
+
+// ════════════════════════════════════════════════════════════
+//  MANUAL SAVE BUTTON  (sync check)
+// ════════════════════════════════════════════════════════════
+async function doManualSave(){
+  const btn=document.getElementById('saveBtn');
+  btn.disabled=true; btn.textContent='⟳ Checking…';
+  try{
+    await saveOrgSettings();
+    const {error}=await db.from('tracker_projects').select('code').limit(1);
+    if(error) throw error;
+    btn.textContent='✓ All Synced'; btn.style.background='#27AE60';
+    setTimeout(()=>{btn.textContent='💾 Save';btn.style.background='';btn.disabled=false;},1800);
+  }catch(e){
+    btn.textContent='⚠ Failed'; btn.style.background='#EB5757';
+    setTimeout(()=>{btn.textContent='💾 Save';btn.style.background='';btn.disabled=false;},2500);
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  AUTH
+// ════════════════════════════════════════════════════════════
+async function handleSignOut(){
+  await db.auth.signOut();
+  window.location.href='/index.html';
+}
+
+// ════════════════════════════════════════════════════════════
+//  INIT  — runs on page load
+// ════════════════════════════════════════════════════════════
+async function init(){
+  setLoadingMsg('Checking authentication…');
+
+  // Auth guard
+  const {data:{session}}=await db.auth.getSession();
+  if(!session){
+    window.location.href='/index.html?redirect='+encodeURIComponent(window.location.pathname);
+    return;
+  }
+
+  setLoadingMsg('Loading your profile…');
+  const {data:profile,error:pErr}=await db.from('profiles')
+    .select('id,full_name,email,role,is_active')
+    .eq('id',session.user.id)
+    .single();
+
+  if(pErr || !profile){
+    // Profile might not exist yet — try to create it from Azure metadata
+    const meta=session.user.user_metadata||{};
+    const {data:newProfile}=await db.from('profiles').upsert({
+      id:session.user.id,
+      email:session.user.email,
+      full_name:meta.full_name||meta.name||session.user.email.split('@')[0],
+      role:'engineer',
+      is_active:true,
+    },{onConflict:'id'}).select().single();
+    currentUser=newProfile||{full_name:session.user.email,role:'engineer'};
+  } else if(!profile.is_active){
+    await db.auth.signOut();
+    window.location.href='/index.html?error=account_inactive';
+    return;
+  } else {
+    currentUser=profile;
+  }
+
+  // Render user info
+  const name=currentUser?.full_name||currentUser?.email||'User';
+  const el=document.getElementById('userAvatar'); if(el) el.textContent=name.charAt(0).toUpperCase();
+  const ne=document.getElementById('userName'); if(ne) ne.textContent=name;
+
+  setLoadingMsg('Loading projects…');
+  await loadProjectsFromCloud();
+
+  setLoadingMsg('Loading resources…');
+  await loadResourcesFromCloud();
+
+  setLoadingMsg('Loading settings…');
+  await loadOrgSettings();
+
+  // Set current week to first Monday of 2026 or current week if >= 2026
+  const today=new Date();
+  if(today.getFullYear()>=2026) currentMon=isoMonday(dateToStr(today));
+  else currentMon='2026-01-05';
+
+  setLoadingMsg('Loading week data…');
+  await loadWeekFromCloud(currentMon);
+
+  // Build UI
+  buildSwatches();
+  buildYearSel();
+  syncYearWeekSelectors();
+  renderWeekly();
+  populatePeriodSel();
+  setSaveStatus('ok');
+
+  // Hide loading overlay
+  document.getElementById('loadingOverlay').style.display='none';
+}
+
+// ── GO ──
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Signing in… — Powermatix</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0D1117;color:#E6EDF3;font-family:'DM Sans',sans-serif;
+      display:flex;align-items:center;justify-content:center;
+      min-height:100vh;flex-direction:column;gap:16px}
+    .spinner{width:36px;height:36px;border:3px solid #30363D;
+      border-top-color:#2ECC71;border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    p{font-size:14px;color:#8B949E}
+    .msg{font-size:12px;color:#6E7681}
+  </style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <p>Completing sign-in…</p>
+  <div class="msg" id="statusMsg">Verifying Microsoft account…</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL  = 'https://hrdkulmzlphkewraafmi.supabase.co';
+    const SUPABASE_ANON = 'sb_publishable_xzUWcC8k_OMShmJ_HvxP1g_JoJVyJeH';
+
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    });
+
+    function setMsg(m) {
+      const el = document.getElementById('statusMsg');
+      if (el) el.textContent = m;
+    }
+
+    (async () => {
+      // Give Supabase time to exchange the OAuth code for a session
+      await new Promise(r => setTimeout(r, 800));
+
+      setMsg('Checking session…');
+      const { data: { session }, error } = await db.auth.getSession();
+
+      if (error || !session) {
+        console.error('[callback] no session:', error?.message);
+        window.location.href = '/index.html?error=auth_failed';
+        return;
+      }
+
+      setMsg('Loading your profile…');
+
+      // Try to fetch existing profile
+      const { data: existing } = await db
+        .from('profiles')
+        .select('id, role, is_active')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (existing) {
+        if (!existing.is_active) {
+          await db.auth.signOut();
+          window.location.href = '/index.html?error=account_inactive';
+          return;
+        }
+        window.location.href = '/tracker/index.html';
+        return;
+      }
+
+      // FIRST LOGIN — create the profile
+      setMsg('Setting up your account…');
+      const meta = session.user.user_metadata || {};
+      const fullName = meta.full_name || meta.name || meta.preferred_username
+        || session.user.email.split('@')[0];
+
+      await db.from('profiles').upsert({
+        id:        session.user.id,
+        email:     session.user.email,
+        full_name: fullName,
+        role:      'engineer',
+        is_active: true,
+        azure_oid: meta.provider_id || meta.sub || null,
+      }, { onConflict: 'id' });
+
+      window.location.href = '/tracker/index.html';
+    })();
+  </script>
+</body>
+</html>

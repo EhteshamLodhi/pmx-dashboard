@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "name": "powermatix-portal",
+  "routes": [
+    { "src": "^/$",                   "dest": "/index.html" },
+    { "src": "^/tracker$",            "dest": "/tracker/index.html" },
+    { "src": "^/tracker/$",           "dest": "/tracker/index.html" },
+    { "src": "^/attendance$",         "dest": "/attendance/index.html" },
+    { "src": "^/attendance/$",        "dest": "/attendance/index.html" },
+    { "src": "^/auth/callback$",      "dest": "/auth/callback.html" },
+    { "src": "^/auth/callback.html$", "dest": "/auth/callback.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Frame-Options",        "value": "DENY" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy",        "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}

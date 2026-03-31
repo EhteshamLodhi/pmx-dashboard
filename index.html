@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Powermatix Portal — Sign In</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Space+Mono:wght@700&display=swap"
+    rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    :root {
+      --dark: #0D1117;
+      --dark2: #161B22;
+      --dark3: #21262D;
+      --border: #30363D;
+      --text: #E6EDF3;
+      --muted: #8B949E;
+      --green: #2ECC71;
+      --green-d: #27AE60;
+      --red: #EB5757;
+    }
+
+    body {
+      background: var(--dark);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .card {
+      background: var(--dark2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+
+    .logo-mark {
+      width: 52px;
+      height: 52px;
+      background: var(--green);
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--dark);
+      margin-bottom: 20px;
+    }
+
+    .logo-name {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -.5px;
+      margin-bottom: 4px
+    }
+
+    .logo-name em {
+      color: var(--green);
+      font-style: normal
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 32px
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 28px 0;
+      position: relative
+    }
+
+    .divider::after {
+      content: 'Workforce Planning Portal';
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--dark2);
+      padding: 0 12px;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .ms-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      width: 100%;
+      padding: 13px 20px;
+      border-radius: 9px;
+      background: #2F2F2F;
+      border: 1px solid #555;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: .2s;
+      text-decoration: none;
+    }
+
+    .ms-btn:hover {
+      background: #3A3A3A;
+      border-color: #777
+    }
+
+    .ms-btn:active {
+      transform: scale(.98)
+    }
+
+    .ms-btn svg {
+      flex-shrink: 0
+    }
+
+    .error-box {
+      background: rgba(235, 87, 87, .1);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: var(--red);
+      display: none;
+    }
+
+    .note {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 24px;
+      line-height: 1.6
+    }
+
+    .loading {
+      display: none;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 16px
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+    <div class="logo-mark">PM</div>
+    <div class="logo-name">Power<em>matix</em></div>
+    <div class="subtitle">Sign in with your Powermatix Microsoft account</div>
+
+    <div class="error-box" id="authError"></div>
+
+    <hr class="divider">
+
+    <button class="ms-btn" id="loginBtn" onclick="signInWithMicrosoft()">
+      <!-- Microsoft Logo SVG -->
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <rect x="1" y="1" width="8.5" height="8.5" fill="#F25022" />
+        <rect x="10.5" y="1" width="8.5" height="8.5" fill="#7FBA00" />
+        <rect x="1" y="10.5" width="8.5" height="8.5" fill="#00A4EF" />
+        <rect x="10.5" y="10.5" width="8.5" height="8.5" fill="#FFB900" />
+      </svg>
+      Sign in with Microsoft
+    </button>
+
+    <div class="loading" id="loadingMsg">Redirecting to Microsoft login…</div>
+
+    <div class="note">
+      Use your <strong>@powermatix.com</strong> Microsoft account.<br>
+      Contact your administrator if you cannot sign in.
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // Inline minimal config for login page
+    const SUPABASE_URL = 'https://hrdkulmzlphkewraafmi.supabase.co';   // ← REPLACE
+    const SUPABASE_ANON = 'sb_publishable_xzUWcC8k_OMShmJ_HvxP1g_JoJVyJeH';                     // ← REPLACE
+
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    async function signInWithMicrosoft() {
+      const btn = document.getElementById('loginBtn');
+      const msg = document.getElementById('loadingMsg');
+      btn.style.display = 'none';
+      msg.style.display = 'block';
+
+      const { error } = await db.auth.signInWithOAuth({
+        provider: 'azure',
+        options: {
+          scopes: 'email profile openid User.Read',
+          redirectTo: window.location.origin + '/auth/callback.html',
+        },
+      });
+
+      if (error) {
+        btn.style.display = 'flex';
+        msg.style.display = 'none';
+        const el = document.getElementById('authError');
+        el.textContent = 'Sign-in failed: ' + error.message;
+        el.style.display = 'block';
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('authError');
+      if (msg) { el.textContent = msg; el.style.display = 'block'; }
+    }
+
+    // Handle error query params (redirected back from other pages)
+    const params = new URLSearchParams(window.location.search);
+    const errMap = {
+      auth_failed: 'Sign-in failed. Please try again.',
+      account_inactive: 'Your account is inactive. Contact your administrator.',
+      profile_missing: 'Profile not found. Contact your administrator.',
+      access_denied: 'Access denied.',
+    };
+    const errCode = params.get('error');
+    if (errCode && errMap[errCode]) showError(errMap[errCode]);
+
+    // If already signed in, redirect to tracker
+    (async () => {
+      const { data: { session } } = await db.auth.getSession();
+      if (session) window.location.href = '/tracker/index.html';
+    })();
+  </script>
+</body>
+
+</html>

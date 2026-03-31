@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Attendance — Powermatix</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --dark: #0D1117;
+      --dark2: #161B22;
+      --dark3: #21262D;
+      --dark4: #2D333B;
+      --border: #30363D;
+      --border2: #3D444D;
+      --text: #E6EDF3;
+      --muted: #8B949E;
+      --muted2: #6E7681;
+      --green: #2ECC71;
+      --green-d: #27AE60;
+      --red: #EB5757;
+      --yellow: #F4C542;
+      --orange: #F4934A;
+      --cyan: #56CCF2;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent
+    }
+
+    body {
+      background: var(--dark);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      max-width: 520px;
+      margin: 0 auto
+    }
+
+    /* HEADER */
+    .hdr {
+      background: var(--dark2);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .lmark {
+      width: 30px;
+      height: 30px;
+      background: var(--green);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--dark)
+    }
+
+    .lname {
+      font-size: 15px;
+      font-weight: 700
+    }
+
+    .lname em {
+      color: var(--green);
+      font-style: normal
+    }
+
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px
+    }
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      background: var(--dark3);
+      border: 1px solid var(--border2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 12px;
+      color: var(--green)
+    }
+
+    .signout-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 5px
+    }
+
+    .signout-btn:hover {
+      color: var(--red);
+      background: rgba(235, 87, 87, .1)
+    }
+
+    /* NAV TABS */
+    .nav-tabs {
+      display: flex;
+      background: var(--dark2);
+      border-bottom: 1px solid var(--border)
+    }
+
+    .ntab {
+      flex: 1;
+      padding: 11px 8px;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: .15s;
+      text-align: center
+    }
+
+    .ntab.on {
+      color: var(--green);
+      border-bottom-color: var(--green)
+    }
+
+    /* MAIN */
+    .main {
+      padding: 20px 18px;
+      padding-bottom: 40px
+    }
+
+    .pane {
+      display: none
+    }
+
+    .pane.on {
+      display: block
+    }
+
+    /* TODAY CARD */
+    .today-card {
+      background: var(--dark2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px 20px;
+      margin-bottom: 18px;
+      text-align: center
+    }
+
+    .today-date {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 4px
+    }
+
+    .today-day {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 20px
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 18px
+    }
+
+    .status-badge.out {
+      background: rgba(139, 148, 158, .12);
+      color: var(--muted)
+    }
+
+    .status-badge.in {
+      background: rgba(46, 204, 113, .12);
+      color: var(--green)
+    }
+
+    .status-badge.done {
+      background: rgba(86, 203, 242, .12);
+      color: var(--cyan)
+    }
+
+    .status-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor
+    }
+
+    .time-row {
+      display: flex;
+      justify-content: center;
+      gap: 28px;
+      margin-bottom: 22px
+    }
+
+    .time-block {
+      text-align: center
+    }
+
+    .time-lbl {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      font-weight: 600
+    }
+
+    .time-val {
+      font-family: 'Space Mono', monospace;
+      font-size: 22px;
+      font-weight: 700
+    }
+
+    .time-val.empty {
+      color: var(--muted);
+      font-size: 16px;
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 400
+    }
+
+    .duration-row {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 22px
+    }
+
+    /* ACTION BUTTONS */
+    .action-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      padding: 16px 20px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: .2s;
+      letter-spacing: .3px;
+    }
+
+    .action-btn:active {
+      transform: scale(.97)
+    }
+
+    .action-btn.checkin {
+      background: var(--green);
+      color: var(--dark)
+    }
+
+    .action-btn.checkin:hover {
+      background: var(--green-d)
+    }
+
+    .action-btn.checkout {
+      background: var(--orange);
+      color: #fff
+    }
+
+    .action-btn.checkout:hover {
+      background: #e07c30
+    }
+
+    .action-btn:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+      transform: none
+    }
+
+    .action-btn.done-state {
+      background: var(--dark3);
+      color: var(--muted);
+      cursor: default
+    }
+
+    .note-input {
+      width: 100%;
+      background: var(--dark3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      padding: 10px 13px;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 12px;
+      outline: none;
+      font-family: 'DM Sans', sans-serif;
+      transition: .15s;
+    }
+
+    .note-input:focus {
+      border-color: var(--green)
+    }
+
+    .note-input::placeholder {
+      color: var(--muted2)
+    }
+
+    /* HISTORY */
+    .hist-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px
+    }
+
+    .hist-item {
+      background: var(--dark2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px
+    }
+
+    .hist-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px
+    }
+
+    .hist-date {
+      font-size: 13px;
+      font-weight: 600
+    }
+
+    .hist-status {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px
+    }
+
+    .hist-status.present {
+      background: rgba(46, 204, 113, .12);
+      color: var(--green)
+    }
+
+    .hist-status.late {
+      background: rgba(244, 197, 66, .12);
+      color: var(--yellow)
+    }
+
+    .hist-status.absent {
+      background: rgba(235, 87, 87, .12);
+      color: var(--red)
+    }
+
+    .hist-status.pending {
+      background: rgba(139, 148, 158, .1);
+      color: var(--muted)
+    }
+
+    .hist-times {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--muted)
+    }
+
+    .hist-times span {
+      display: flex;
+      gap: 5px;
+      align-items: center
+    }
+
+    .hist-times strong {
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 12px
+    }
+
+    /* CORRECTION FORM */
+    .correction-card {
+      background: var(--dark2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 16px;
+      margin-bottom: 14px
+    }
+
+    .frow {
+      margin-bottom: 12px
+    }
+
+    .flbl {
+      font-size: 11px;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500
+    }
+
+    .finp {
+      width: 100%;
+      background: var(--dark3);
+      border: 1px solid var(--border2);
+      color: var(--text);
+      padding: 9px 11px;
+      border-radius: 7px;
+      font-size: 14px;
+      outline: none;
+      transition: .15s;
+      font-family: 'DM Sans', sans-serif
+    }
+
+    .finp:focus {
+      border-color: var(--green)
+    }
+
+    /* TOAST */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      z-index: 999;
+      display: none;
+      min-width: 200px;
+      text-align: center;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, .4)
+    }
+
+    .toast.success {
+      background: var(--green);
+      color: var(--dark)
+    }
+
+    .toast.error {
+      background: var(--red);
+      color: #fff
+    }
+
+    /* LOADING */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      flex-direction: column;
+      gap: 14px
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin .8s linear infinite
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .loading-txt {
+      font-size: 13px;
+      color: var(--muted)
+    }
+
+    @media (min-width:521px) {
+      body {
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border)
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-txt">Loading…</div>
+  </div>
+
+  <header class="hdr">
+    <div class="logo-row">
+      <div class="lmark">PM</div>
+      <div class="lname">Power<em>matix</em></div>
+    </div>
+    <div class="user-pill">
+      <div class="avatar" id="userAvatar">?</div>
+      <span id="userName" style="font-size:12px;color:var(--muted)">—</span>
+      <a href="/tracker/index.html" style="background:none;border:1px solid #3D444D;color:#56CCF2;font-size:11px;cursor:pointer;padding:4px 10px;border-radius:5px;text-decoration:none;margin-right:4px">← Tracker</a><button class="signout-btn" onclick="handleSignOut()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="nav-tabs">
+    <button class="ntab on" onclick="switchTab('today', this)">Today</button>
+    <button class="ntab" onclick="switchTab('history', this)">My History</button>
+    <button class="ntab" onclick="switchTab('correct', this)">Correction</button>
+  </div>
+
+  <div class="main">
+
+    <!-- TODAY TAB -->
+    <div class="pane on" id="pane-today">
+      <div class="today-card">
+        <div class="today-date" id="todayDateLbl">—</div>
+        <div class="today-day" id="todayDayLbl">—</div>
+        <div class="status-badge out" id="statusBadge">
+          <div class="dot"></div>
+          <span id="statusText">Not checked in</span>
+        </div>
+        <div class="time-row">
+          <div class="time-block">
+            <div class="time-lbl">Check In</div>
+            <div class="time-val empty" id="checkInTime">—</div>
+          </div>
+          <div class="time-block">
+            <div class="time-lbl">Check Out</div>
+            <div class="time-val empty" id="checkOutTime">—</div>
+          </div>
+        </div>
+        <div class="duration-row" id="durationRow"></div>
+      </div>
+
+      <input type="text" class="note-input" id="noteInput" placeholder="Optional note (e.g. Working from site)">
+
+      <button class="action-btn checkin" id="actionBtn" onclick="handleAction()">
+        <span id="actionIcon">✓</span>
+        <span id="actionLabel">Check In</span>
+      </button>
+
+      <div id="doneMsg" style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted);display:none">
+        You've checked in and out today. Have a great evening! 👋
+      </div>
+    </div>
+
+    <!-- HISTORY TAB -->
+    <div class="pane" id="pane-history">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Last 30 days</div>
+      <div class="hist-list" id="histList">
+        <div style="text-align:center;color:var(--muted);font-size:13px;padding:20px">Loading history…</div>
+      </div>
+    </div>
+
+    <!-- CORRECTION TAB -->
+    <div class="pane" id="pane-correct">
+      <div class="correction-card">
+        <div style="font-size:14px;font-weight:600;margin-bottom:14px">Request Past Date Correction</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+          Corrections for past dates require manager approval before they're applied.
+        </div>
+        <div class="frow">
+          <label class="flbl">Date</label>
+          <input type="date" class="finp" id="corrDate" max="">
+        </div>
+        <div class="frow">
+          <label class="flbl">Corrected Check-In Time</label>
+          <input type="time" class="finp" id="corrCheckIn">
+        </div>
+        <div class="frow">
+          <label class="flbl">Corrected Check-Out Time</label>
+          <input type="time" class="finp" id="corrCheckOut">
+        </div>
+        <div class="frow">
+          <label class="flbl">Reason for correction</label>
+          <input type="text" class="finp" id="corrReason" placeholder="e.g. Forgot to check in at site">
+        </div>
+        <button class="action-btn checkin" style="margin-top:4px;font-size:14px;padding:13px"
+          onclick="submitCorrection()">
+          Submit for Approval
+        </button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);text-align:center;line-height:1.7">
+        Your manager will be notified to approve this correction.<br>
+        Changes apply only after approval is granted.
+      </div>
+    </div>
+
+  </div><!-- /main -->
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // ── CONFIG ── Replace these two values ──────────────────────
+    const SUPABASE_URL = 'https://hrdkulmzlphkewraafmi.supabase.co';
+    const SUPABASE_ANON = 'sb_publishable_xzUWcC8k_OMShmJ_HvxP1g_JoJVyJeH';
+    // ────────────────────────────────────────────────────────────
+
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+    let currentUser = null;
+    let todayRecord = null;
+
+    // ── INIT ──────────────────────────────────────────────────
+    async function init() {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session) { window.location.href = '/index.html'; return; }
+
+      const { data: profile } = await db
+        .from('profiles')
+        .select('id, full_name, email, role, is_active')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!profile?.is_active) { window.location.href = '/index.html?error=account_inactive'; return; }
+
+      currentUser = profile;
+
+      // Render header
+      document.getElementById('userName').textContent = profile.full_name || profile.email;
+      document.getElementById('userAvatar').textContent = (profile.full_name || profile.email).charAt(0).toUpperCase();
+
+      // Set date display
+      const now = new Date();
+      const today = now.toISOString().slice(0, 10);
+      document.getElementById('todayDateLbl').textContent = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      document.getElementById('corrDate').max = new Date(Date.now() - 86400000).toISOString().slice(0, 10); // yesterday max
+
+      // Load today's record
+      await refreshTodayView();
+
+      document.getElementById('loadingOverlay').style.display = 'none';
+    }
+
+    async function refreshTodayView() {
+      const today = new Date().toISOString().slice(0, 10);
+      const { data } = await db.from('attendance')
+        .select('check_in, check_out, status')
+        .eq('user_id', currentUser.id)
+        .eq('date', today)
+        .maybeSingle();
+
+      todayRecord = data;
+      renderTodayState(data);
+    }
+
+    function renderTodayState(rec) {
+      const badge = document.getElementById('statusBadge');
+      const status = document.getElementById('statusText');
+      const inEl = document.getElementById('checkInTime');
+      const outEl = document.getElementById('checkOutTime');
+      const durEl = document.getElementById('durationRow');
+      const btn = document.getElementById('actionBtn');
+      const lbl = document.getElementById('actionLabel');
+      const ico = document.getElementById('actionIcon');
+      const done = document.getElementById('doneMsg');
+      const note = document.getElementById('noteInput');
+
+      if (!rec?.check_in) {
+        // Not checked in
+        badge.className = 'status-badge out';
+        status.textContent = 'Not checked in';
+        inEl.textContent = '—'; inEl.className = 'time-val empty';
+        outEl.textContent = '—'; outEl.className = 'time-val empty';
+        durEl.textContent = '';
+        btn.className = 'action-btn checkin'; btn.disabled = false;
+        lbl.textContent = 'Check In'; ico.textContent = '✓';
+        done.style.display = 'none'; note.style.display = 'block';
+      } else if (!rec?.check_out) {
+        // Checked in, not out
+        badge.className = rec.status === 'late' ? 'status-badge in' : 'status-badge in';
+        status.textContent = rec.status === 'late' ? 'Checked In (Late)' : 'Checked In ✓';
+        inEl.textContent = formatTime(rec.check_in); inEl.className = 'time-val';
+        outEl.textContent = '—'; outEl.className = 'time-val empty';
+        const elapsed = ((new Date() - new Date(rec.check_in)) / 3600000).toFixed(1);
+        durEl.textContent = `${elapsed}h elapsed`;
+        btn.className = 'action-btn checkout'; btn.disabled = false;
+        lbl.textContent = 'Check Out'; ico.textContent = '◉';
+        done.style.display = 'none'; note.style.display = 'block';
+      } else {
+        // Both done
+        badge.className = 'status-badge done';
+        status.textContent = 'Day Complete ✓';
+        inEl.textContent = formatTime(rec.check_in); inEl.className = 'time-val';
+        outEl.textContent = formatTime(rec.check_out); outEl.className = 'time-val';
+        durEl.textContent = 'Duration: ' + formatDuration(rec.check_in, rec.check_out);
+        btn.className = 'action-btn done-state'; btn.disabled = true;
+        lbl.textContent = 'Completed'; ico.textContent = '✓';
+        done.style.display = 'block'; note.style.display = 'none';
+      }
+    }
+
+    async function handleAction() {
+      const note = document.getElementById('noteInput').value.trim();
+      const btn = document.getElementById('actionBtn');
+      btn.disabled = true;
+
+      try {
+        if (!todayRecord?.check_in) {
+          // Check In
+          const today = new Date().toISOString().slice(0, 10);
+          const now = new Date().toISOString();
+          const isL = isLate(now);
+
+          const { error } = await db.from('attendance').upsert({
+            user_id: currentUser.id, date: today, check_in: now,
+            check_in_note: note || null, status: isL ? 'late' : 'present',
+          }, { onConflict: 'user_id,date' });
+
+          if (error) throw error;
+          showToast('Checked in at ' + formatTime(now) + (isL ? ' (late)' : ''), 'success');
+
+        } else {
+          // Check Out
+          const now = new Date().toISOString();
+          const { error } = await db.from('attendance')
+            .update({ check_out: now, check_out_note: note || null })
+            .eq('user_id', currentUser.id)
+            .eq('date', new Date().toISOString().slice(0, 10));
+
+          if (error) throw error;
+          showToast('Checked out at ' + formatTime(now), 'success');
+        }
+
+        document.getElementById('noteInput').value = '';
+        await refreshTodayView();
+
+      } catch (err) {
+        showToast(err.message || 'Action failed', 'error');
+        btn.disabled = false;
+      }
+    }
+
+    async function loadHistory() {
+      const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const { data, error } = await db.from('attendance')
+        .select('date, check_in, check_out, status, is_correction')
+        .eq('user_id', currentUser.id)
+        .gte('date', from)
+        .order('date', { ascending: false });
+
+      const list = document.getElementById('histList');
+      if (error || !data?.length) {
+        list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px">No records yet</div>';
+        return;
+      }
+
+      list.innerHTML = data.map(r => `
+    <div class="hist-item">
+      <div class="hist-top">
+        <div class="hist-date">${formatDateDisplay(r.date)}</div>
+        <span class="hist-status ${r.status}">${r.status}${r.is_correction ? ' (corrected)' : ''}</span>
+      </div>
+      <div class="hist-times">
+        <span>IN <strong>${formatTime(r.check_in)}</strong></span>
+        <span>OUT <strong>${formatTime(r.check_out)}</strong></span>
+        ${r.check_in && r.check_out ? `<span>⏱ <strong>${formatDuration(r.check_in, r.check_out)}</strong></span>` : ''}
+      </div>
+    </div>
+  `).join('');
+    }
+
+    async function submitCorrection() {
+      const date = document.getElementById('corrDate').value;
+      const inTime = document.getElementById('corrCheckIn').value;
+      const outTime = document.getElementById('corrCheckOut').value;
+      const reason = document.getElementById('corrReason').value.trim();
+
+      if (!date || !inTime || !reason) {
+        showToast('Please fill in date, check-in time, and reason', 'error'); return;
+      }
+
+      const checkInISO = new Date(date + 'T' + inTime).toISOString();
+      const checkOutISO = outTime ? new Date(date + 'T' + outTime).toISOString() : null;
+
+      try {
+        // Upsert the attendance record as pending correction
+        const { data: existing } = await db.from('attendance')
+          .select('id').eq('user_id', currentUser.id).eq('date', date).maybeSingle();
+
+        if (existing?.id) {
+          await db.from('attendance').update({
+            check_in: checkInISO, check_out: checkOutISO,
+            is_correction: true, correction_reason: reason, status: 'pending',
+          }).eq('id', existing.id);
+        } else {
+          await db.from('attendance').insert({
+            user_id: currentUser.id, date, check_in: checkInISO,
+            check_out: checkOutISO, is_correction: true,
+            correction_reason: reason, status: 'pending',
+          });
+        }
+
+        // Get admin id for level_2 approver
+        const { data: admins } = await db.from('profiles').select('id').eq('role', 'admin').limit(1);
+
+        await db.from('approval_requests').insert({
+          entity_type: 'attendance_correction',
+          entity_id: existing?.id || null,
+          requested_by: currentUser.id,
+          level_1_approver: currentUser.manager_id || null,
+          level_2_approver: admins?.[0]?.id || null,
+        });
+
+        showToast('Correction submitted for approval', 'success');
+        document.getElementById('corrDate').value = '';
+        document.getElementById('corrCheckIn').value = '';
+        document.getElementById('corrCheckOut').value = '';
+        document.getElementById('corrReason').value = '';
+      } catch (err) {
+        showToast('Submission failed: ' + err.message, 'error');
+      }
+    }
+
+    // ── TABS ──
+    function switchTab(id, btn) {
+      document.querySelectorAll('.pane').forEach(p => p.classList.remove('on'));
+      document.querySelectorAll('.ntab').forEach(b => b.classList.remove('on'));
+      document.getElementById('pane-' + id).classList.add('on');
+      btn.classList.add('on');
+      if (id === 'history') loadHistory();
+    }
+
+    function handleSignOut() {
+      db.auth.signOut().then(() => window.location.href = '/index.html');
+    }
+
+    // ── FORMAT UTILS ──
+    function formatTime(iso) {
+      if (!iso) return '—';
+      return new Date(iso).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+    function formatDuration(cin, cout) {
+      if (!cin || !cout) return '—';
+      const m = Math.round((new Date(cout) - new Date(cin)) / 60000);
+      return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+    }
+    function formatDateDisplay(s) {
+      return new Date(s + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    }
+    function isLate(iso) {
+      const d = new Date(iso); return d.getHours() > 9 || (d.getHours() === 9 && d.getMinutes() > 30);
+    }
+
+    // ── TOAST ──
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.className = 'toast ' + type; t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 3500);
+    }
+
+    // ── START ──
+    init();
+  </script>
+</body>
+
+</html>
