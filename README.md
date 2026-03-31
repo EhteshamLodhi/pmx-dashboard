@@ -1,7 +1,7 @@
 # Powermatix Workforce Portal
 ## Deployment Instructions
 
-Everything is pre-configured. You only need to do **3 things**:
+Everything is pre-configured. You only need to do *3 things*:
 run the SQL, configure Vercel, and add your Supabase credentials to Azure.
 
 ---
