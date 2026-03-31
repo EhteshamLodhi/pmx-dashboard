@@ -617,7 +617,7 @@
     // ── INIT ──────────────────────────────────────────────────
     let db = window.db;
 
-    window.addEventListener('portalStateLoaded', async () => {
+    const initAttendance = async () => {
       db = window.db;
       const profile = window.portalState.Profile;
       currentUser = profile;
@@ -631,7 +631,13 @@
       await refreshTodayView();
 
       document.getElementById('loadingOverlay').style.display = 'none';
-    });
+    };
+
+    if (window.portalState && window.portalState.isLoaded) {
+      initAttendance();
+    } else {
+      window.addEventListener('portalStateLoaded', initAttendance);
+    }
 
     async function refreshTodayView() {
       const today = new Date().toISOString().slice(0, 10);

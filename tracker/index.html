@@ -381,7 +381,7 @@
 // ════════════════════════════════════════════════════════════
 const db = window.db;
 
-window.addEventListener('portalStateLoaded', async () => {
+const initTracker = async () => {
     // Basic Role-Based Visibility
     const role = window.portalState.Profile.role;
     if (role === 'engineer') {
@@ -392,7 +392,13 @@ window.addEventListener('portalStateLoaded', async () => {
         cfgSels.forEach(el => el.disabled = true);
     }
     await loadInitialData();
-});
+};
+
+if (window.portalState && window.portalState.isLoaded) {
+    initTracker();
+} else {
+    window.addEventListener('portalStateLoaded', initTracker);
+}
 
 async function loadInitialData() {
     loadOrgSettings();
