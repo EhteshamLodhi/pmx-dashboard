@@ -2,13 +2,25 @@
   "version": 2,
   "name": "powermatix-portal",
   "routes": [
-    { "src": "^/$",                   "dest": "/index.html" },
-    { "src": "^/tracker$",            "dest": "/tracker/index.html" },
-    { "src": "^/tracker/$",           "dest": "/tracker/index.html" },
-    { "src": "^/attendance$",         "dest": "/attendance/index.html" },
-    { "src": "^/attendance/$",        "dest": "/attendance/index.html" },
-    { "src": "^/auth/callback$",      "dest": "/auth/callback.html" },
-    { "src": "^/auth/callback.html$", "dest": "/auth/callback.html" }
+    { "src": "^/$",                        "dest": "/index.html" },
+    { "src": "^/tracker$",                 "dest": "/tracker/index.html" },
+    { "src": "^/tracker/$",                "dest": "/tracker/index.html" },
+    { "src": "^/attendance$",              "dest": "/attendance/index.html" },
+    { "src": "^/attendance/$",             "dest": "/attendance/index.html" },
+    { "src": "^/dashboard$",               "dest": "/dashboard/index.html" },
+    { "src": "^/dashboard/$",              "dest": "/dashboard/index.html" },
+    { "src": "^/approvals$",               "dest": "/approvals/index.html" },
+    { "src": "^/approvals/$",              "dest": "/approvals/index.html" },
+    { "src": "^/reports$",                 "dest": "/reports/index.html" },
+    { "src": "^/reports/$",                "dest": "/reports/index.html" },
+    { "src": "^/team$",                    "dest": "/team/index.html" },
+    { "src": "^/team/$",                   "dest": "/team/index.html" },
+    { "src": "^/admin/users$",             "dest": "/admin/users.html" },
+    { "src": "^/admin/users/$",            "dest": "/admin/users.html" },
+    { "src": "^/admin/settings$",          "dest": "/admin/settings.html" },
+    { "src": "^/admin/settings/$",         "dest": "/admin/settings.html" },
+    { "src": "^/auth/callback$",           "dest": "/auth/callback.html" },
+    { "src": "^/auth/callback.html$",      "dest": "/auth/callback.html" }
   ],
   "headers": [
     {
