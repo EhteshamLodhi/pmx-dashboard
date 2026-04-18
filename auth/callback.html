@@ -27,7 +27,11 @@
 
     const { createClient } = supabase;
     const db = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true   // This exchanges the URL fragment for a session
+      }
     });
 
     function setMsg(m) {
@@ -35,15 +39,26 @@
       if (el) el.textContent = m;
     }
 
+    // Poll for session — detectSessionInUrl processes the fragment async,
+    // so we retry up to ~5 seconds instead of using a fixed delay.
+    async function waitForSession(maxMs = 5000, intervalMs = 300) {
+      const deadline = Date.now() + maxMs;
+      while (Date.now() < deadline) {
+        const { data: { session }, error } = await db.auth.getSession();
+        if (session) return session;
+        if (error) { console.error('[callback] getSession error:', error.message); return null; }
+        await new Promise(r => setTimeout(r, intervalMs));
+      }
+      return null;
+    }
+
     (async () => {
-      // Give Supabase time to exchange the OAuth code for a session
-      await new Promise(r => setTimeout(r, 800));
+      setMsg('Exchanging Microsoft token…');
 
-      setMsg('Checking session…');
-      const { data: { session }, error } = await db.auth.getSession();
+      const session = await waitForSession();
 
-      if (error || !session) {
-        console.error('[callback] no session:', error?.message);
+      if (!session) {
+        console.error('[callback] No session after waiting.');
         window.location.href = '/index.html?error=auth_failed';
         return;
       }
@@ -73,7 +88,7 @@
       const fullName = meta.full_name || meta.name || meta.preferred_username
         || session.user.email.split('@')[0];
 
-      await db.from('profiles').upsert({
+      const { error: upsertErr } = await db.from('profiles').upsert({
         id:        session.user.id,
         email:     session.user.email,
         full_name: fullName,
@@ -81,6 +96,11 @@
         is_active: true,
         azure_oid: meta.provider_id || meta.sub || null,
       }, { onConflict: 'id' });
+
+      if (upsertErr) {
+        console.error('[callback] Profile upsert failed:', upsertErr.message);
+        // Still redirect — profile may exist, let portalState handle it
+      }
 
       window.location.href = '/tracker/index.html';
     })();
