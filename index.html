@@ -172,7 +172,6 @@
     <hr class="divider">
 
     <button class="ms-btn" id="loginBtn" onclick="signInWithMicrosoft()">
-      <!-- Microsoft Logo SVG -->
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
         <rect x="1" y="1" width="8.5" height="8.5" fill="#F25022" />
         <rect x="10.5" y="1" width="8.5" height="8.5" fill="#7FBA00" />
@@ -192,9 +191,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    // Inline minimal config for login page
-    const SUPABASE_URL = 'https://hrdkulmzlphkewraafmi.supabase.co';   // ← REPLACE
-    const SUPABASE_ANON = 'sb_publishable_xzUWcC8k_OMShmJ_HvxP1g_JoJVyJeH';                     // ← REPLACE
+    const SUPABASE_URL  = 'https://vcquollgfqbgofrgxfha.supabase.co';
+    const SUPABASE_ANON = 'sb_publishable_-Y5NFc5q_msiatgFLVeFTA_FK0lKS2F';
 
     const { createClient } = supabase;
     const db = createClient(SUPABASE_URL, SUPABASE_ANON);
@@ -227,7 +225,6 @@
       if (msg) { el.textContent = msg; el.style.display = 'block'; }
     }
 
-    // Handle error query params (redirected back from other pages)
     const params = new URLSearchParams(window.location.search);
     const errMap = {
       auth_failed: 'Sign-in failed. Please try again.',
@@ -238,7 +235,6 @@
     const errCode = params.get('error');
     if (errCode && errMap[errCode]) showError(errMap[errCode]);
 
-    // If already signed in, redirect to tracker
     (async () => {
       const { data: { session } } = await db.auth.getSession();
       if (session) window.location.href = '/tracker/index.html';
