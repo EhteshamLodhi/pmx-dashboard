@@ -5,6 +5,8 @@
     { "src": "^/$",                        "dest": "/index.html" },
     { "src": "^/tracker$",                 "dest": "/tracker/index.html" },
     { "src": "^/tracker/$",                "dest": "/tracker/index.html" },
+    { "src": "^/tasks$",                   "dest": "/tasks/index.html" },
+    { "src": "^/tasks/$",                  "dest": "/tasks/index.html" },
     { "src": "^/attendance$",              "dest": "/attendance/index.html" },
     { "src": "^/attendance/$",             "dest": "/attendance/index.html" },
     { "src": "^/dashboard$",               "dest": "/dashboard/index.html" },
