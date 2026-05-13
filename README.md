@@ -65,7 +65,7 @@ Run the latest `supabase/schema.sql` after pulling updates. It adds:
 - `attendance_settings`
 - notification and push RLS policies
 
-On Vercel, `vercel.json` schedules `/api/notifications/reminders` every 15 minutes. Set `CRON_SECRET` in Vercel and protect external calls with the `Authorization: Bearer <CRON_SECRET>` header.
+On Vercel Hobby, high-frequency cron schedules are not allowed, so `vercel.json` does not register the reminder endpoint automatically. Keep `CRON_SECRET` in Vercel and trigger `/api/notifications/reminders` from an external scheduler if you want reminder automation on Hobby. Upgrading to Vercel Pro lets you restore a frequent built-in cron schedule.
 
 For production OAuth, add the production callback to Supabase:
 
