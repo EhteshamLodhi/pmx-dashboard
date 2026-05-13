@@ -1,4 +1,4 @@
-# PowerMatix Attendance Tracking Portal
+PowerMatix Attendance Tracking Portal
 
 Production-ready Next.js 15 PWA based on the supplied Figma Make screens.
 
