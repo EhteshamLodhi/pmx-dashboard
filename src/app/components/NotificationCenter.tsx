@@ -36,6 +36,8 @@ export function NotificationCenter() {
     markNotificationRead,
     markAllNotificationsRead,
     enablePushNotifications,
+    pushNotificationsEnabled,
+    pushNotificationsSupported,
   } = useApp();
   const [open, setOpen] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
@@ -124,10 +126,22 @@ export function NotificationCenter() {
           <div className="px-4 py-3 bg-gray-50 border-t border-gray-100">
             <button
               onClick={() => void handleEnablePush()}
+              disabled={!pushNotificationsSupported}
               className="w-full py-2 rounded-xl bg-green-600 text-white hover:bg-green-700 text-sm font-semibold"
             >
-              Enable Push Notifications
+              {!pushNotificationsSupported
+                ? 'Push Not Supported Here'
+                : pushNotificationsEnabled
+                  ? 'Push Enabled On This Device'
+                  : 'Enable Push Notifications'}
             </button>
+            <p className="text-[11px] text-gray-500 mt-2 text-center">
+              {pushNotificationsSupported
+                ? pushNotificationsEnabled
+                  ? 'All new in-app alerts on this device will also surface as push notifications.'
+                  : 'Enable push on this browser or installed app to receive system notifications here.'
+                : 'Use Chrome, Edge, or the installed PWA to receive push notifications.'}
+            </p>
             {pushMessage && <p className="text-[11px] text-gray-500 mt-2 text-center">{pushMessage}</p>}
           </div>
         </div>

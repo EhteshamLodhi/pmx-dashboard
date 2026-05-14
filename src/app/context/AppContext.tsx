@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
 import type { AppNotification, AttendanceRecord, AttendanceStatus, LeaveRequest, LeaveType, User } from '../types';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
@@ -15,6 +15,8 @@ interface AppContextType {
   leaveRequests: LeaveRequest[];
   notifications: AppNotification[];
   unreadNotifications: number;
+  pushNotificationsEnabled: boolean;
+  pushNotificationsSupported: boolean;
   logout: () => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
@@ -86,6 +88,12 @@ function upsertById<T extends { id: string }>(items: T[], item: T) {
   return exists ? items.map((candidate) => (candidate.id === item.id ? item : candidate)) : [item, ...items];
 }
 
+function notificationVibration(category: AppNotification['category']) {
+  if (category === 'approval') return [300, 120, 300, 120, 600];
+  if (category === 'attendance') return [250, 100, 250, 100, 250];
+  return [200, 100, 200, 100, 400];
+}
+
 function applyRolePosition(user: User): User {
   return {
     ...user,
@@ -108,9 +116,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState(false);
+  const deliveredNotificationIds = useRef<Set<string>>(new Set());
 
   const supabaseEnabled = isSupabaseConfigured();
   const today = useMemo(() => getTodayIsoDate(), []);
+  const pushNotificationsSupported =
+    typeof window !== 'undefined' &&
+    'Notification' in window &&
+    'serviceWorker' in navigator &&
+    'PushManager' in window;
 
   const bootstrapProfile = useCallback(async () => {
     const response = await fetch('/api/profile/bootstrap', {
@@ -256,6 +271,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await syncSession(supabase, session, options);
   }, [syncSession]);
 
+  const refreshPushStatus = useCallback(async () => {
+    if (!pushNotificationsSupported) {
+      setPushNotificationsEnabled(false);
+      return;
+    }
+
+    if (Notification.permission !== 'granted') {
+      setPushNotificationsEnabled(false);
+      return;
+    }
+
+    const registration = await navigator.serviceWorker.ready;
+    const existingSubscription = await registration.pushManager.getSubscription();
+    setPushNotificationsEnabled(Boolean(existingSubscription));
+  }, [pushNotificationsSupported]);
+
+  const showLocalSystemNotification = useCallback(
+    async (notification: AppNotification) => {
+      if (!pushNotificationsSupported || !pushNotificationsEnabled) return;
+      if (Notification.permission !== 'granted') return;
+      if (deliveredNotificationIds.current.has(notification.id)) return;
+
+      deliveredNotificationIds.current.add(notification.id);
+
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const options = {
+          body: notification.message,
+          icon: '/icon-192.png',
+          badge: '/badge-72.png',
+          tag: notification.id,
+          requireInteraction: notification.category === 'approval' || notification.category === 'attendance',
+          vibrate: notificationVibration(notification.category),
+          data: {
+            link: notification.link ?? '/dashboard',
+          },
+        } as NotificationOptions & { vibrate?: number[] };
+
+        await registration.showNotification(notification.title, options);
+      } catch (error) {
+        console.error('Unable to show local system notification', error);
+        deliveredNotificationIds.current.delete(notification.id);
+      }
+    },
+    [pushNotificationsEnabled, pushNotificationsSupported],
+  );
+
   useEffect(() => {
     const supabase = createClient();
 
@@ -296,6 +358,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [supabaseEnabled, syncSession]);
 
   useEffect(() => {
+    void refreshPushStatus();
+  }, [refreshPushStatus]);
+
+  useEffect(() => {
     const supabase = createClient();
     if (!supabase || !currentUser) return;
 
@@ -311,7 +377,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setNotifications((items) => upsertById(items, mapNotification(payload.new as Parameters<typeof mapNotification>[0])));
+            const nextNotification = mapNotification(payload.new as Parameters<typeof mapNotification>[0]);
+            setNotifications((items) => upsertById(items, nextNotification));
+            void showLocalSystemNotification(nextNotification);
             return;
           }
 
@@ -336,7 +404,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [currentUser, refreshData]);
+  }, [currentUser, showLocalSystemNotification]);
 
   const getTodayRecord = useCallback(
     (userId?: string) => {
@@ -452,7 +520,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!testResponse.ok) {
       throw new Error(await parseApiError(testResponse));
     }
-  }, []);
+
+    await refreshPushStatus();
+  }, [refreshPushStatus]);
 
   const checkIn = useCallback(async () => {
     if (!currentUser) throw new Error('No active user session found.');
@@ -859,6 +929,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         leaveRequests,
         notifications,
         unreadNotifications,
+        pushNotificationsEnabled,
+        pushNotificationsSupported,
         logout,
         markNotificationRead,
         markAllNotificationsRead,
