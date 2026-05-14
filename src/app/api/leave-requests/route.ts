@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireSupabase } from '@/server/responses';
 import { requireAuthenticatedUser } from '@/server/auth';
-import { createNotification, createRoleNotification } from '@/server/notifications';
+import { tryCreateNotification, tryCreateRoleNotification } from '@/server/notifications';
 
 const leaveTypes = ['sick', 'emergency', 'casual', 'annual'] as const;
 type LeaveType = (typeof leaveTypes)[number];
@@ -194,7 +194,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: workflowError.message }, { status: 400 });
   }
 
-  await createNotification(admin, {
+  await tryCreateNotification(admin, {
     userId: employee.line_manager_id,
     category: 'approval',
     title: 'Leave approval pending',
@@ -203,7 +203,7 @@ export async function POST(request: Request) {
     sourceKey: `leave-submitted:${data.id}:manager`,
   });
 
-  await createRoleNotification(admin, ['director'], {
+  await tryCreateRoleNotification(admin, ['director'], {
     category: 'approval',
     title: 'Leave request submitted',
     message: `${employee.full_name} submitted a ${leaveType} leave request for ${startDate} to ${endDate}.`,
@@ -289,7 +289,7 @@ export async function PATCH(request: Request) {
   }
 
   if (approved && level === 1) {
-    await createRoleNotification(admin, ['director'], {
+    await tryCreateRoleNotification(admin, ['director'], {
       category: 'approval',
       title: 'Director approval pending',
       message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for final approval.`,
@@ -299,7 +299,7 @@ export async function PATCH(request: Request) {
   }
 
   if (!approved || level === 2) {
-    await createNotification(admin, {
+    await tryCreateNotification(admin, {
       userId: leave.employee_id,
       category: 'leave',
       title: approved ? 'Leave request approved' : 'Leave request rejected',

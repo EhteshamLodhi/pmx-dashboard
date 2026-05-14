@@ -93,3 +93,43 @@ export async function createRoleNotification(
     })),
   );
 }
+
+export async function tryCreateNotification(admin: SupabaseClient, input: NotificationInput) {
+  try {
+    await createNotification(admin, input);
+  } catch (error) {
+    console.error('Notification side-effect failed', {
+      type: 'single',
+      input,
+      error,
+    });
+  }
+}
+
+export async function tryCreateNotifications(admin: SupabaseClient, inputs: NotificationInput[]) {
+  try {
+    await createNotifications(admin, inputs);
+  } catch (error) {
+    console.error('Notification side-effect failed', {
+      type: 'batch',
+      inputs,
+      error,
+    });
+  }
+}
+
+export async function tryCreateRoleNotification(
+  admin: SupabaseClient,
+  roles: string[],
+  input: Omit<NotificationInput, 'userId'>,
+) {
+  try {
+    await createRoleNotification(admin, roles, input);
+  } catch (error) {
+    console.error('Role notification side-effect failed', {
+      roles,
+      input,
+      error,
+    });
+  }
+}

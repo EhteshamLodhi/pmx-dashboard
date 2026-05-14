@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAuthenticatedUser } from '@/server/auth';
 import { requireSupabase } from '@/server/responses';
-import { createNotification, createRoleNotification } from '@/server/notifications';
+import { tryCreateNotification, tryCreateRoleNotification } from '@/server/notifications';
 import { formatDisplayTime } from '@/lib/time';
 
 function localNow() {
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
 
       const checkInTime = localTime();
       if (appUser.line_manager_id) {
-        await createNotification(admin, {
+        await tryCreateNotification(admin, {
           userId: appUser.line_manager_id,
           category: 'attendance',
           title: `${appUser.full_name} checked in`,
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
         });
       }
 
-      await createRoleNotification(admin, ['director'], {
+      await tryCreateRoleNotification(admin, ['director'], {
         category: 'attendance',
         title: 'Employee check-in recorded',
         message: `${appUser.full_name} checked in at ${formatDisplayTime(checkInTime)}.${status === 'late' ? ' Marked late.' : ''}`,
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
 
     const checkOutTime = localTime();
     if (appUser.line_manager_id) {
-      await createNotification(admin, {
+      await tryCreateNotification(admin, {
         userId: appUser.line_manager_id,
         category: 'attendance',
         title: `${appUser.full_name} checked out`,
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
       });
     }
 
-    await createRoleNotification(admin, ['director'], {
+    await tryCreateRoleNotification(admin, ['director'], {
       category: 'attendance',
       title: 'Employee check-out recorded',
       message: `${appUser.full_name} checked out at ${formatDisplayTime(checkOutTime)} after ${Number(totalHours.toFixed(2))} hour(s).`,

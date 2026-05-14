@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireUserRole } from '@/server/auth';
-import { createRoleNotification } from '@/server/notifications';
+import { tryCreateRoleNotification } from '@/server/notifications';
 
 export async function POST(request: Request) {
   const authResult = await requireUserRole(['admin']);
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     after_state: data,
   });
 
-  await createRoleNotification(admin, ['admin'], {
+  await tryCreateRoleNotification(admin, ['admin'], {
     category: 'admin',
     title: 'Attendance entry created',
     message: 'An attendance record was manually created by an admin.',
@@ -58,7 +58,7 @@ export async function PATCH(request: Request) {
     after_state: data,
   });
 
-  await createRoleNotification(admin, ['admin'], {
+  await tryCreateRoleNotification(admin, ['admin'], {
     category: 'admin',
     title: 'Attendance entry edited',
     message: 'An attendance record was manually corrected by an admin.',

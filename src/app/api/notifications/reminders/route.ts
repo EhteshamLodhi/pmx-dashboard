@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { createNotifications, createRoleNotification } from '@/server/notifications';
+import { tryCreateNotifications, tryCreateRoleNotification } from '@/server/notifications';
 
 function minutesFromTime(value: string) {
   const [hours, minutes] = value.slice(0, 5).split(':').map(Number);
@@ -133,7 +133,7 @@ export async function GET(request: Request) {
       }];
     });
 
-  await createNotifications(admin, [
+  await tryCreateNotifications(admin, [
     ...checkInNotifications,
     ...managerCheckInNotifications,
     ...checkOutNotifications,
@@ -141,7 +141,7 @@ export async function GET(request: Request) {
   ]);
 
   if (checkInNotifications.length > 0) {
-    await createRoleNotification(admin, ['admin'], {
+    await tryCreateRoleNotification(admin, ['admin'], {
       category: 'admin',
       title: 'Missing attendance alert',
       message: `${checkInNotifications.length} employee(s) have not checked in today.`,
