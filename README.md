@@ -54,6 +54,8 @@ Additional environment variables:
 
 ```bash
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:admin@powermatix.com
 CRON_SECRET=
 APP_TIMEZONE_OFFSET_MINUTES=300
 ```

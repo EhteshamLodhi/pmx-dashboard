@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { NotificationCategory } from '@/app/types';
+import { sendPushNotifications } from '@/server/push';
 
 type NotificationInput = {
   userId: string;
@@ -25,6 +26,17 @@ export async function createNotification(admin: SupabaseClient, input: Notificat
     : await admin.from('notifications').insert(payload);
 
   if (error) throw error;
+
+  await sendPushNotifications(admin, [
+    {
+      userId: input.userId,
+      category: input.category,
+      title: input.title,
+      message: input.message,
+      link: input.link,
+      tag: input.sourceKey ?? `${input.category}:${input.userId}`,
+    },
+  ]);
 }
 
 export async function createNotifications(admin: SupabaseClient, inputs: NotificationInput[]) {
@@ -45,6 +57,18 @@ export async function createNotifications(admin: SupabaseClient, inputs: Notific
     : await admin.from('notifications').insert(payload);
 
   if (error) throw error;
+
+  await sendPushNotifications(
+    admin,
+    inputs.map((input) => ({
+      userId: input.userId,
+      category: input.category,
+      title: input.title,
+      message: input.message,
+      link: input.link,
+      tag: input.sourceKey ?? `${input.category}:${input.userId}`,
+    })),
+  );
 }
 
 export async function createRoleNotification(

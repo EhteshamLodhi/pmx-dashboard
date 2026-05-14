@@ -63,12 +63,6 @@ function getLeaveDays(startDate: string, endDate: string) {
   return Math.floor((Date.parse(endDate) - Date.parse(startDate)) / 86_400_000) + 1;
 }
 
-function notificationVibration(category?: string) {
-  if (category === 'approval') return [300, 120, 300, 120, 600];
-  if (category === 'attendance') return [250, 100, 250, 100, 250];
-  return [200, 100, 200, 100, 400];
-}
-
 async function parseApiError(response: Response) {
   try {
     const body = await response.json();
@@ -315,27 +309,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           table: 'notifications',
           filter: `user_id=eq.${currentUser.id}`,
         },
-          (payload) => {
-            if (payload.eventType === 'INSERT' && 'Notification' in window && Notification.permission === 'granted') {
-              const row = payload.new as { title?: string; message?: string; link?: string; category?: string; id?: string };
-              if ('vibrate' in navigator) {
-                navigator.vibrate(notificationVibration(row.category));
-              }
-              navigator.serviceWorker.ready
-                .then((registration) => {
-                  const options = {
-                    body: row.message ?? 'You have a new notification.',
-                    icon: '/icon.svg',
-                    badge: '/maskable-icon.svg',
-                    requireInteraction: row.category === 'approval' || row.category === 'attendance',
-                    tag: row.id ?? row.category ?? 'powermatix-notification',
-                    vibrate: notificationVibration(row.category),
-                    data: { link: row.link ?? '/dashboard' },
-                  } as NotificationOptions;
-                  return registration.showNotification(row.title ?? 'PowerMatix', options);
-                })
-                .catch(() => undefined);
-            }
+        (payload) => {
           if (payload.eventType === 'INSERT') {
             setNotifications((items) => upsertById(items, mapNotification(payload.new as Parameters<typeof mapNotification>[0])));
             return;
