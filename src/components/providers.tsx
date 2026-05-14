@@ -7,7 +7,12 @@ import { PwaInstallPrompt } from '@/components/pwa-install-prompt';
 export function Providers({ children }: { children: ReactNode }) {
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+      navigator.serviceWorker
+        .register('/sw.js', { scope: '/' })
+        .then((registration) => registration.update())
+        .catch((error) => {
+          console.error('Service worker registration failed', error);
+        });
     }
   }, []);
 

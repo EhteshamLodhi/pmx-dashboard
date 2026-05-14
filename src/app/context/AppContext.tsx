@@ -443,6 +443,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) throw new Error(await parseApiError(response));
+
+    const testResponse = await fetch('/api/push-subscriptions/test', {
+      method: 'POST',
+      credentials: 'include',
+    });
+
+    if (!testResponse.ok) {
+      throw new Error(await parseApiError(testResponse));
+    }
   }, []);
 
   const checkIn = useCallback(async () => {

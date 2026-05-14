@@ -88,7 +88,15 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
 
           if (statusCode === 404 || statusCode === 410) {
             staleSubscriptionIds.push(subscription.id);
+            return;
           }
+
+          console.error('Push delivery failed', {
+            subscriptionId: subscription.id,
+            userId: input.userId,
+            statusCode,
+            error,
+          });
         }
       }),
     ),
