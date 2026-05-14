@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Users, Search, Edit3, Check, X, ChevronDown, Shield, UserCheck, UserX, PlusCircle, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { PolicySettings, User } from '../types';
@@ -40,6 +40,7 @@ function UserRow({
     checkInGraceMinutes: user.checkInGraceMinutes ?? 15,
     checkOutReminderTime: user.checkOutReminderTime ?? '19:00',
     sickLeaveDays: user.sickLeaveDays ?? 10,
+    emergencyLeaveDays: user.emergencyLeaveDays ?? 5,
     casualLeaveDays: user.casualLeaveDays ?? 10,
     annualLeaveDays: user.annualLeaveDays ?? 14,
   });
@@ -91,7 +92,7 @@ function UserRow({
               {user.email}
             </p>
             <p className="text-gray-400" style={{ fontSize: '12px' }}>
-              {user.position} - {user.department}
+              {user.position} - {user.project ?? 'Unassigned'}
             </p>
           </div>
         </div>
@@ -189,6 +190,7 @@ function UserRow({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {[
               ['Sick Leave Days', 'sickLeaveDays'],
+              ['Emergency Leave Days', 'emergencyLeaveDays'],
               ['Casual Leave Days', 'casualLeaveDays'],
               ['Annual Leave Days', 'annualLeaveDays'],
             ].map(([label, key]) => (
@@ -197,7 +199,7 @@ function UserRow({
                 <input
                   type="number"
                   min={0}
-                  value={form[key as 'sickLeaveDays' | 'casualLeaveDays' | 'annualLeaveDays']}
+                  value={form[key as 'sickLeaveDays' | 'emergencyLeaveDays' | 'casualLeaveDays' | 'annualLeaveDays']}
                   onChange={(event) => setForm((value) => ({ ...value, [key]: Number(event.target.value) }))}
                   className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
                   style={{ fontSize: '13px' }}
@@ -339,12 +341,17 @@ function PolicySettingsPanel() {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [policy, setPolicy] = useState<PolicySettings>({
+    defaultReportingTime: '09:00',
     checkInGraceMinutes: 15,
     checkOutReminderTime: '19:00',
-    minimumLeaveNoticeHours: 48,
     sickLeaveDays: 10,
+    emergencyLeaveDays: 5,
     casualLeaveDays: 10,
     annualLeaveDays: 14,
+    casualLeaveNoticeHours: 48,
+    annualLeaveNoticeHours: 48,
+    leavePolicyNotes:
+      'Sick leave can be used for medical illness or treatment and does not require advance notice.\nEmergency leave can be used for urgent personal or family situations and does not require advance notice.\nCasual leave is for planned short personal time away and requires advance notice.\nAnnual leave is for planned vacations or longer breaks and requires advance notice.',
   });
 
   useEffect(() => {
@@ -398,6 +405,15 @@ function PolicySettingsPanel() {
         <div className="px-5 pb-5 pt-1 border-t border-gray-100">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <label className="text-sm text-gray-600">
+              Default Reporting Time
+              <input
+                type="time"
+                value={policy.defaultReportingTime}
+                onChange={(event) => setPolicy((value) => ({ ...value, defaultReportingTime: event.target.value }))}
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+            <label className="text-sm text-gray-600">
               Default Check-in Cutoff Minutes
               <input
                 type="number"
@@ -417,17 +433,18 @@ function PolicySettingsPanel() {
               />
             </label>
             <label className="text-sm text-gray-600">
-              Leave Notice Hours
+              Casual Leave Notice Hours
               <input
                 type="number"
                 min={0}
-                value={policy.minimumLeaveNoticeHours}
-                onChange={(event) => setPolicy((value) => ({ ...value, minimumLeaveNoticeHours: Number(event.target.value) }))}
+                value={policy.casualLeaveNoticeHours}
+                onChange={(event) => setPolicy((value) => ({ ...value, casualLeaveNoticeHours: Number(event.target.value) }))}
                 className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
               />
             </label>
             {[
               ['Default Sick Leave Days', 'sickLeaveDays'],
+              ['Default Emergency Leave Days', 'emergencyLeaveDays'],
               ['Default Casual Leave Days', 'casualLeaveDays'],
               ['Default Annual Leave Days', 'annualLeaveDays'],
             ].map(([label, key]) => (
@@ -436,13 +453,32 @@ function PolicySettingsPanel() {
                 <input
                   type="number"
                   min={0}
-                  value={policy[key as 'sickLeaveDays' | 'casualLeaveDays' | 'annualLeaveDays']}
+                  value={policy[key as 'sickLeaveDays' | 'emergencyLeaveDays' | 'casualLeaveDays' | 'annualLeaveDays']}
                   onChange={(event) => setPolicy((value) => ({ ...value, [key]: Number(event.target.value) }))}
                   className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
                 />
               </label>
             ))}
+            <label className="text-sm text-gray-600">
+              Annual Leave Notice Hours
+              <input
+                type="number"
+                min={0}
+                value={policy.annualLeaveNoticeHours}
+                onChange={(event) => setPolicy((value) => ({ ...value, annualLeaveNoticeHours: Number(event.target.value) }))}
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
           </div>
+          <label className="mt-3 block text-sm text-gray-600">
+            Leave Policy Notes
+            <textarea
+              rows={5}
+              value={policy.leavePolicyNotes}
+              onChange={(event) => setPolicy((value) => ({ ...value, leavePolicyNotes: event.target.value }))}
+              className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500 resize-none"
+            />
+          </label>
           <button
             onClick={() => void save()}
             disabled={isSaving}
@@ -464,6 +500,7 @@ function PolicySettingsPanel() {
 export default function UserManagement() {
   const { users, updateUser, addUser } = useApp();
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [filterRole, setFilterRole] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [showAddUser, setShowAddUser] = useState(false);
@@ -472,13 +509,13 @@ export default function UserManagement() {
     name: '',
     email: '',
     role: 'employee' as User['role'],
-    department: '',
     project: '',
     position: '',
     reportingTime: '09:00',
     checkInGraceMinutes: 15,
     checkOutReminderTime: '19:00',
     sickLeaveDays: 10,
+    emergencyLeaveDays: 5,
     casualLeaveDays: 10,
     annualLeaveDays: 14,
     lineManagerId: '',
@@ -489,10 +526,10 @@ export default function UserManagement() {
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
       const matchesSearch =
-        !search ||
-        user.name.toLowerCase().includes(search.toLowerCase()) ||
-        user.email.toLowerCase().includes(search.toLowerCase()) ||
-        user.department.toLowerCase().includes(search.toLowerCase());
+        !deferredSearch ||
+        user.name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        user.email.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+        (user.project ?? '').toLowerCase().includes(deferredSearch.toLowerCase());
       const matchesRole = filterRole === 'all' || user.role === filterRole;
       const matchesStatus =
         filterStatus === 'all' ||
@@ -501,17 +538,17 @@ export default function UserManagement() {
 
       return matchesSearch && matchesRole && matchesStatus;
     });
-  }, [filterRole, filterStatus, search, users]);
+  }, [deferredSearch, filterRole, filterStatus, users]);
 
   const activeCount = users.filter((user) => user.isActive).length;
-  const departmentCount = new Set(users.map((user) => user.department)).size;
+  const projectCount = new Set(users.map((user) => user.project ?? 'Unassigned')).size;
 
   const handleUpdate = async (userId: string, updates: Partial<User>) => {
     await updateUser(userId, updates);
   };
 
   const handleCreateUser = async () => {
-    if (!newUser.name || !newUser.email || !newUser.department) return;
+    if (!newUser.name || !newUser.email || !newUser.project) return;
 
     try {
       setError(null);
@@ -521,13 +558,13 @@ export default function UserManagement() {
         name: '',
         email: '',
         role: 'employee',
-        department: '',
         project: '',
         position: '',
         reportingTime: '09:00',
         checkInGraceMinutes: 15,
         checkOutReminderTime: '19:00',
         sickLeaveDays: 10,
+        emergencyLeaveDays: 5,
         casualLeaveDays: 10,
         annualLeaveDays: 14,
         lineManagerId: '',
@@ -574,13 +611,13 @@ export default function UserManagement() {
               {[
                 ['Full Name', 'name', 'text'],
                 ['Email', 'email', 'email'],
-                ['Department', 'department', 'text'],
                 ['Project', 'project', 'text'],
                 ['Position', 'position', 'text'],
                 ['Reporting Time', 'reportingTime', 'time'],
                 ['Check-in Cutoff Minutes', 'checkInGraceMinutes', 'number'],
                 ['Check-out Reminder', 'checkOutReminderTime', 'time'],
                 ['Sick Leave Days', 'sickLeaveDays', 'number'],
+                ['Emergency Leave Days', 'emergencyLeaveDays', 'number'],
                 ['Casual Leave Days', 'casualLeaveDays', 'number'],
                 ['Annual Leave Days', 'annualLeaveDays', 'number'],
               ].map(([label, key, type]) => (
@@ -694,7 +731,7 @@ export default function UserManagement() {
         {[
           { label: 'Total Users', value: users.length, color: 'text-gray-900', bg: 'bg-gray-50' },
           { label: 'Active', value: activeCount, color: 'text-green-600', bg: 'bg-green-50' },
-          { label: 'Departments', value: departmentCount, color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Projects', value: projectCount, color: 'text-blue-600', bg: 'bg-blue-50' },
           { label: 'Admins', value: users.filter((user) => user.role === 'admin').length, color: 'text-red-600', bg: 'bg-red-50' },
         ].map((stat) => (
           <div key={stat.label} className={`${stat.bg} rounded-xl p-4`}>
@@ -713,7 +750,7 @@ export default function UserManagement() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search by name, email, department..."
+            placeholder="Search by name, email, project..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500"

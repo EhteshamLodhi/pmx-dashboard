@@ -89,7 +89,7 @@ https://tgetcffechhepdwejnva.supabase.co/auth/v1/callback
 - Employee check-in/check-out with one attendance record per day
 - Leave request form with future-date validation
 - Sequential line manager and director approval timeline
-- Admin attendance dashboard with date, department, and project filters
+- Admin attendance dashboard with date and project filters
 - Admin edit modal with remarks and audit metadata
 - User management with add/edit/disable and hierarchy assignment
 - PWA install support and offline app shell

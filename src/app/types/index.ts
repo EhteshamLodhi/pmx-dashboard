@@ -5,13 +5,13 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  department: string;
   project?: string;
   position: string;
   reportingTime?: string;
   checkInGraceMinutes?: number;
   checkOutReminderTime?: string;
   sickLeaveDays?: number;
+  emergencyLeaveDays?: number;
   casualLeaveDays?: number;
   annualLeaveDays?: number;
   lineManagerId?: string;
@@ -37,7 +37,7 @@ export interface AttendanceRecord {
   editedAt?: string;
 }
 
-export type LeaveType = 'sick' | 'casual' | 'annual';
+export type LeaveType = 'sick' | 'emergency' | 'casual' | 'annual';
 export type LeaveStatus = 'pending_manager' | 'pending_director' | 'approved' | 'rejected';
 
 export interface LeaveApproval {
@@ -54,7 +54,7 @@ export interface LeaveRequest {
   id: string;
   userId: string;
   userName: string;
-  userDepartment: string;
+  userProject: string;
   type: LeaveType;
   startDate: string;
   endDate: string;
@@ -79,10 +79,14 @@ export interface AppNotification {
 }
 
 export interface PolicySettings {
+  defaultReportingTime: string;
   checkInGraceMinutes: number;
   checkOutReminderTime: string;
-  minimumLeaveNoticeHours: number;
   sickLeaveDays: number;
+  emergencyLeaveDays: number;
   casualLeaveDays: number;
   annualLeaveDays: number;
+  casualLeaveNoticeHours: number;
+  annualLeaveNoticeHours: number;
+  leavePolicyNotes: string;
 }

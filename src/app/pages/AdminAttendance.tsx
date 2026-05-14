@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { AlertTriangle, Calendar, CheckCircle2, Clock, Edit3, Search, Shield, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { AttendanceRecord, AttendanceStatus, User } from '../types';
+import { formatDisplayTime } from '@/lib/time';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -30,9 +31,9 @@ function formatHours(record?: AttendanceRecord) {
 export default function AdminAttendance() {
   const { users, attendanceRecords, updateAttendanceRecord, addAttendanceRecord, currentUser } = useApp();
   const [selectedDate, setSelectedDate] = useState(TODAY);
-  const [department, setDepartment] = useState('all');
   const [project, setProject] = useState('all');
   const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
   const [editing, setEditing] = useState<{ user: User; record?: AttendanceRecord } | null>(null);
   const [editForm, setEditForm] = useState({
     checkIn: '',
@@ -43,19 +44,17 @@ export default function AdminAttendance() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const activeEmployees = users.filter((user) => user.isActive && user.role !== 'admin');
-  const departments = Array.from(new Set(activeEmployees.map((user) => user.department)));
   const projects = Array.from(new Set(activeEmployees.map((user) => user.project ?? 'Unassigned')));
 
   const rows = useMemo(() => {
     return activeEmployees
-      .filter((user) => department === 'all' || user.department === department)
       .filter((user) => project === 'all' || (user.project ?? 'Unassigned') === project)
-      .filter((user) => !search || `${user.name} ${user.email} ${user.department}`.toLowerCase().includes(search.toLowerCase()))
+      .filter((user) => !deferredSearch || `${user.name} ${user.email} ${user.project ?? ''}`.toLowerCase().includes(deferredSearch.toLowerCase()))
       .map((user) => ({
         user,
         record: attendanceRecords.find((record) => record.userId === user.id && record.date === selectedDate),
       }));
-  }, [activeEmployees, attendanceRecords, department, project, search, selectedDate]);
+  }, [activeEmployees, attendanceRecords, deferredSearch, project, selectedDate]);
 
   const summary = {
     total: rows.length,
@@ -131,7 +130,7 @@ export default function AdminAttendance() {
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <label className="text-sm text-gray-600">
             Date
             <input
@@ -140,13 +139,6 @@ export default function AdminAttendance() {
               onChange={(event) => setSelectedDate(event.target.value)}
               className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
             />
-          </label>
-          <label className="text-sm text-gray-600">
-            Department
-            <select value={department} onChange={(event) => setDepartment(event.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500">
-              <option value="all">All departments</option>
-              {departments.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
           </label>
           <label className="text-sm text-gray-600">
             Project
@@ -202,7 +194,6 @@ export default function AdminAttendance() {
             <thead className="bg-gray-50 text-gray-400 uppercase text-[11px] tracking-wide">
               <tr>
                 <th className="text-left px-4 py-3 font-bold">Employee Name</th>
-                <th className="text-left px-4 py-3 font-bold">Department</th>
                 <th className="text-left px-4 py-3 font-bold">Project</th>
                 <th className="text-left px-4 py-3 font-bold">Reporting Time</th>
                 <th className="text-left px-4 py-3 font-bold">Closing Time</th>
@@ -221,10 +212,9 @@ export default function AdminAttendance() {
                       <div className="font-semibold text-gray-900">{user.name}</div>
                       <div className="text-xs text-gray-500">{user.email}</div>
                     </td>
-                    <td className="px-4 py-3 text-gray-700">{user.department}</td>
                     <td className="px-4 py-3 text-gray-700">{user.project ?? 'Unassigned'}</td>
-                    <td className="px-4 py-3 tabular-nums text-gray-700">{record?.checkIn ?? '-'}</td>
-                    <td className="px-4 py-3 tabular-nums text-gray-700">{record?.checkOut ?? '-'}</td>
+                    <td className="px-4 py-3 tabular-nums text-gray-700">{formatDisplayTime(record?.checkIn)}</td>
+                    <td className="px-4 py-3 tabular-nums text-gray-700">{formatDisplayTime(record?.checkOut)}</td>
                     <td className="px-4 py-3 tabular-nums text-gray-700">{formatHours(record)}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${meta.badge}`}>{meta.label}</span>

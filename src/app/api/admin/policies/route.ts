@@ -3,17 +3,25 @@ import { requireUserRole } from '@/server/auth';
 
 function toPolicyResponse(row: Record<string, unknown>) {
   return {
+    defaultReportingTime: String(row.default_reporting_time ?? '09:00').slice(0, 5),
     checkInGraceMinutes: row.check_in_grace_minutes ?? 15,
     checkOutReminderTime: String(row.check_out_reminder_time ?? '19:00').slice(0, 5),
-    minimumLeaveNoticeHours: row.minimum_leave_notice_hours ?? 48,
     sickLeaveDays: row.sick_leave_days ?? 10,
+    emergencyLeaveDays: row.emergency_leave_days ?? 5,
     casualLeaveDays: row.casual_leave_days ?? 10,
     annualLeaveDays: row.annual_leave_days ?? 14,
+    casualLeaveNoticeHours: row.casual_leave_notice_hours ?? 48,
+    annualLeaveNoticeHours: row.annual_leave_notice_hours ?? 48,
+    leavePolicyNotes:
+      String(
+        row.leave_policy_notes ??
+          'Sick leave can be used for medical illness or treatment and does not require advance notice.\nEmergency leave can be used for urgent personal or family situations and does not require advance notice.\nCasual leave is for planned short personal time away and requires advance notice.\nAnnual leave is for planned vacations or longer breaks and requires advance notice.',
+      ),
   };
 }
 
 export async function GET() {
-  const authResult = await requireUserRole(['admin']);
+  const authResult = await requireUserRole(['admin', 'director']);
   if (authResult.response || !authResult.admin) return authResult.response;
 
   const { data, error } = await authResult.admin
@@ -27,17 +35,21 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  const authResult = await requireUserRole(['admin']);
+  const authResult = await requireUserRole(['admin', 'director']);
   if (authResult.response || !authResult.admin) return authResult.response;
 
   const body = await request.json();
   const payload = {
+    default_reporting_time: body.defaultReportingTime || '09:00',
     check_in_grace_minutes: Number(body.checkInGraceMinutes ?? 15),
     check_out_reminder_time: body.checkOutReminderTime || '19:00',
-    minimum_leave_notice_hours: Number(body.minimumLeaveNoticeHours ?? 48),
     sick_leave_days: Number(body.sickLeaveDays ?? 10),
+    emergency_leave_days: Number(body.emergencyLeaveDays ?? 5),
     casual_leave_days: Number(body.casualLeaveDays ?? 10),
     annual_leave_days: Number(body.annualLeaveDays ?? 14),
+    casual_leave_notice_hours: Number(body.casualLeaveNoticeHours ?? 48),
+    annual_leave_notice_hours: Number(body.annualLeaveNoticeHours ?? 48),
+    leave_policy_notes: String(body.leavePolicyNotes ?? '').trim(),
   };
 
   const { data: existing, error: existingError } = await authResult.admin

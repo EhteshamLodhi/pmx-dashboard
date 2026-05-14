@@ -65,6 +65,7 @@ export async function createRoleNotification(
     (users ?? []).map((user) => ({
       userId: user.id,
       ...input,
+      sourceKey: input.sourceKey ? `${input.sourceKey}:${user.id}` : undefined,
     })),
   );
 }

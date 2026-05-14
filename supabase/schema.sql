@@ -24,30 +24,27 @@ begin
 end
 $$;
 
-create table if not exists public.departments (
+alter type public.leave_type add value if not exists 'emergency';
+
+create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
   created_at timestamptz not null default now()
 );
 
-create table if not exists public.projects (
-  id uuid primary key default gen_random_uuid(),
-  name text not null unique,
-  department_id uuid references public.departments(id) on delete set null,
-  created_at timestamptz not null default now()
-);
+alter table public.projects drop column if exists department_id;
 
 create table if not exists public.users (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
   email text not null unique,
   role public.user_role not null default 'employee',
-  department_id uuid references public.departments(id) on delete set null,
   project_id uuid references public.projects(id) on delete set null,
   reporting_time time not null default '09:00',
   check_in_grace_minutes integer not null default 15,
   check_out_reminder_time time not null default '19:00',
   sick_leave_days integer not null default 10,
+  emergency_leave_days integer not null default 5,
   casual_leave_days integer not null default 10,
   annual_leave_days integer not null default 14,
   line_manager_id uuid references public.users(id) on delete set null,
@@ -60,11 +57,15 @@ create table if not exists public.users (
   updated_at timestamptz not null default now()
 );
 
+alter table public.users drop column if exists department_id;
 alter table public.users add column if not exists check_in_grace_minutes integer not null default 15;
 alter table public.users add column if not exists check_out_reminder_time time not null default '19:00';
 alter table public.users add column if not exists sick_leave_days integer not null default 10;
+alter table public.users add column if not exists emergency_leave_days integer not null default 5;
 alter table public.users add column if not exists casual_leave_days integer not null default 10;
 alter table public.users add column if not exists annual_leave_days integer not null default 14;
+
+drop table if exists public.departments;
 
 create table if not exists public.attendance_logs (
   id uuid primary key default gen_random_uuid(),
@@ -154,23 +155,39 @@ create table if not exists public.push_subscriptions (
 
 create table if not exists public.attendance_settings (
   id uuid primary key default gen_random_uuid(),
+  default_reporting_time time not null default '09:00',
   check_in_grace_minutes integer not null default 15,
   check_out_reminder_time time not null default '19:00',
   minimum_leave_notice_hours integer not null default 48,
   sick_leave_days integer not null default 10,
+  emergency_leave_days integer not null default 5,
   casual_leave_days integer not null default 10,
   annual_leave_days integer not null default 14,
+  casual_leave_notice_hours integer not null default 48,
+  annual_leave_notice_hours integer not null default 48,
+  leave_policy_notes text not null default 'Sick leave can be used for medical illness or treatment and does not require advance notice.
+Emergency leave can be used for urgent personal or family situations and does not require advance notice.
+Casual leave is for planned short personal time away and requires advance notice.
+Annual leave is for planned vacations or longer breaks and requires advance notice.',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+alter table public.attendance_settings add column if not exists default_reporting_time time not null default '09:00';
 alter table public.attendance_settings add column if not exists minimum_leave_notice_hours integer not null default 48;
 alter table public.attendance_settings add column if not exists sick_leave_days integer not null default 10;
+alter table public.attendance_settings add column if not exists emergency_leave_days integer not null default 5;
 alter table public.attendance_settings add column if not exists casual_leave_days integer not null default 10;
 alter table public.attendance_settings add column if not exists annual_leave_days integer not null default 14;
+alter table public.attendance_settings add column if not exists casual_leave_notice_hours integer not null default 48;
+alter table public.attendance_settings add column if not exists annual_leave_notice_hours integer not null default 48;
+alter table public.attendance_settings add column if not exists leave_policy_notes text not null default 'Sick leave can be used for medical illness or treatment and does not require advance notice.
+Emergency leave can be used for urgent personal or family situations and does not require advance notice.
+Casual leave is for planned short personal time away and requires advance notice.
+Annual leave is for planned vacations or longer breaks and requires advance notice.';
 
-insert into public.attendance_settings (check_in_grace_minutes, check_out_reminder_time)
-select 15, '19:00'
+insert into public.attendance_settings (default_reporting_time, check_in_grace_minutes, check_out_reminder_time)
+select '09:00', 15, '19:00'
 where not exists (select 1 from public.attendance_settings);
 
 create index if not exists attendance_logs_work_date_idx on public.attendance_logs(work_date);
@@ -270,7 +287,6 @@ after insert on auth.users
 for each row
 execute function public.handle_new_user();
 
-alter table public.departments enable row level security;
 alter table public.projects enable row level security;
 alter table public.users enable row level security;
 alter table public.attendance_logs enable row level security;
@@ -364,5 +380,5 @@ with check (user_id = auth.uid());
 drop policy if exists "Admins manage attendance settings" on public.attendance_settings;
 create policy "Admins manage attendance settings" on public.attendance_settings
 for all
-using (public.current_user_role() = 'admin')
-with check (public.current_user_role() = 'admin');
+using (public.current_user_role() in ('admin', 'director'))
+with check (public.current_user_role() in ('admin', 'director'));

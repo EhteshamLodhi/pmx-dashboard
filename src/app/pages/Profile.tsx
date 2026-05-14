@@ -99,7 +99,7 @@ export default function Profile() {
                   {getRoleLabel(currentUser.role)}
                 </span>
                 <span className="text-green-200" style={{ fontSize: '12px' }}>
-                  {currentUser.department}
+                  {currentUser.project ?? 'Unassigned'}
                 </span>
               </div>
             </div>
@@ -126,7 +126,7 @@ export default function Profile() {
         <div className="divide-y divide-gray-50">
           {[
             { icon: Mail, label: 'Email', value: currentUser.email },
-            { icon: Building, label: 'Department', value: currentUser.department },
+            { icon: Building, label: 'Project', value: currentUser.project ?? 'Unassigned' },
             {
               icon: Calendar,
               label: 'Joined',

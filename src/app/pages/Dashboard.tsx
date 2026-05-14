@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LeaveRequest } from '../types';
+import { formatDisplayTime } from '@/lib/time';
 
 const TODAY = new Date().toISOString().split('T')[0];
 const TODAY_LABEL = new Date().toLocaleDateString('en-US', {
@@ -52,6 +53,7 @@ function getLeaveStatusBadge(status: LeaveRequest['status']) {
 function getLeaveTypeLabel(type: string) {
   switch (type) {
     case 'sick': return 'Sick Leave';
+    case 'emergency': return 'Emergency Leave';
     case 'casual': return 'Casual Leave';
     case 'annual': return 'Annual Leave';
     default: return type;
@@ -145,7 +147,7 @@ function AdminDailyBoard() {
       <div className="grid grid-cols-12 gap-0 px-4 py-2 border-b border-gray-100 bg-gray-50">
         {[
           { label: 'Employee', span: 'col-span-4' },
-          { label: 'Department', span: 'col-span-3' },
+          { label: 'Project', span: 'col-span-3' },
           { label: 'Check In', span: 'col-span-2 text-center' },
           { label: 'Check Out', span: 'col-span-2 text-center' },
           { label: 'Status', span: 'col-span-1 text-center' },
@@ -186,16 +188,16 @@ function AdminDailyBoard() {
                 </div>
               </div>
 
-              {/* Dept */}
+              {/* Project */}
               <div className="col-span-3">
-                <p className="text-gray-600 truncate" style={{ fontSize: '12px' }}>{user.department}</p>
+                <p className="text-gray-600 truncate" style={{ fontSize: '12px' }}>{user.project ?? 'Unassigned'}</p>
               </div>
 
               {/* Check In */}
               <div className="col-span-2 text-center">
                 {record?.checkIn ? (
                   <span className="text-green-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 600 }}>
-                    {record.checkIn}
+                    {formatDisplayTime(record.checkIn)}
                   </span>
                 ) : (
                   <span className="text-gray-300" style={{ fontSize: '13px' }}>—</span>
@@ -207,7 +209,7 @@ function AdminDailyBoard() {
                 {record?.checkOut ? (
                   <div>
                     <span className="text-blue-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 600 }}>
-                      {record.checkOut}
+                      {formatDisplayTime(record.checkOut)}
                     </span>
                     {duration && (
                       <p className="text-gray-400" style={{ fontSize: '10px' }}>{duration}</p>
@@ -328,7 +330,7 @@ export default function Dashboard() {
           {getGreeting()}, {currentUser?.name.split(' ')[0]}
         </h1>
         <p className="text-green-100 mt-0.5" style={{ fontSize: '13px' }}>
-          {currentUser?.position} · {currentUser?.department}
+          {currentUser?.position} · {currentUser?.project ?? 'Unassigned'}
         </p>
       </div>
 
@@ -370,7 +372,7 @@ export default function Dashboard() {
                   <>
                     <CheckCircle2 className="w-8 h-8 text-white drop-shadow" />
                     <span className="text-white tabular-nums" style={{ fontSize: '18px', fontWeight: 700, lineHeight: 1 }}>
-                      {todayRecord.checkIn}
+                      {formatDisplayTime(todayRecord.checkIn)}
                     </span>
                     <span className="text-green-100" style={{ fontSize: '11px', fontWeight: 500 }}>Checked In</span>
                   </>
@@ -422,7 +424,7 @@ export default function Dashboard() {
                   <>
                     <CheckCircle2 className="w-8 h-8 text-white drop-shadow" />
                     <span className="text-white tabular-nums" style={{ fontSize: '18px', fontWeight: 700, lineHeight: 1 }}>
-                      {todayRecord.checkOut}
+                      {formatDisplayTime(todayRecord.checkOut)}
                     </span>
                     <span className="text-blue-100" style={{ fontSize: '11px', fontWeight: 500 }}>Checked Out</span>
                   </>

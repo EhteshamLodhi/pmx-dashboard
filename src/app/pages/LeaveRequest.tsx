@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { CalendarDays, PlusCircle, Clock, CheckCircle2, XCircle, ChevronRight, Info } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CalendarDays, PlusCircle, Clock, CheckCircle2, XCircle, ChevronRight, Info, Edit3, Save } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { LeaveType, LeaveRequest } from '../types';
+import { LeaveType, LeaveRequest, PolicySettings } from '../types';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
 function getLeaveTypeLabel(type: LeaveType) {
   switch (type) {
     case 'sick': return 'Sick Leave';
+    case 'emergency': return 'Emergency Leave';
     case 'casual': return 'Casual Leave';
     case 'annual': return 'Annual Leave';
   }
@@ -18,6 +19,7 @@ function getLeaveTypeLabel(type: LeaveType) {
 function getLeaveTypeColor(type: LeaveType) {
   switch (type) {
     case 'sick': return { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-400' };
+    case 'emergency': return { bg: 'bg-rose-50', text: 'text-rose-600', dot: 'bg-rose-400' };
     case 'casual': return { bg: 'bg-blue-50', text: 'text-blue-600', dot: 'bg-blue-400' };
     case 'annual': return { bg: 'bg-purple-50', text: 'text-purple-600', dot: 'bg-purple-400' };
   }
@@ -44,6 +46,40 @@ export default function LeaveRequestPage() {
   const [submitted, setSubmitted] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const [editingPolicy, setEditingPolicy] = useState(false);
+  const [policy, setPolicy] = useState<PolicySettings>({
+    defaultReportingTime: '09:00',
+    checkInGraceMinutes: 15,
+    checkOutReminderTime: '19:00',
+    sickLeaveDays: 10,
+    emergencyLeaveDays: 5,
+    casualLeaveDays: 10,
+    annualLeaveDays: 14,
+    casualLeaveNoticeHours: 48,
+    annualLeaveNoticeHours: 48,
+    leavePolicyNotes:
+      'Sick leave can be used for medical illness or treatment and does not require advance notice.\nEmergency leave can be used for urgent personal or family situations and does not require advance notice.\nCasual leave is for planned short personal time away and requires advance notice.\nAnnual leave is for planned vacations or longer breaks and requires advance notice.',
+  });
+
+  useEffect(() => {
+    fetch('/api/admin/policies', { credentials: 'include' })
+      .then(async (response) => {
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) return null;
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error ?? 'Unable to load leave policy information.');
+        }
+        return response.json();
+      })
+      .then((body) => {
+        if (body?.data) setPolicy(body.data);
+      })
+      .catch((error) => {
+        setPolicyError(error instanceof Error ? error.message : 'Unable to load leave policy information.');
+      });
+  }, []);
 
   const myRequests = leaveRequests
     .filter((r) => r.userId === currentUser?.id)
@@ -92,6 +128,31 @@ export default function LeaveRequestPage() {
     .filter((request) => request.status === 'pending_manager' || request.status === 'pending_director')
     .reduce((sum, request) => sum + request.totalDays, 0);
   const rejectedRequests = myRequests.filter((request) => request.status === 'rejected').length;
+  const canEditPolicy = currentUser?.role === 'admin' || currentUser?.role === 'director';
+
+  const savePolicy = async () => {
+    try {
+      setSavingPolicy(true);
+      setPolicyError(null);
+      const response = await fetch('/api/admin/policies', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(policy),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? 'Unable to save leave policy information.');
+      }
+
+      setEditingPolicy(false);
+    } catch (error) {
+      setPolicyError(error instanceof Error ? error.message : 'Unable to save leave policy information.');
+    } finally {
+      setSavingPolicy(false);
+    }
+  };
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto">
@@ -114,6 +175,101 @@ export default function LeaveRequestPage() {
       </div>
 
       {/* Leave Request Form */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-gray-900" style={{ fontSize: '16px', fontWeight: 600 }}>Leave Policy Information</h2>
+            <p className="text-gray-500 mt-1" style={{ fontSize: '13px' }}>
+              Eligibility and notice requirements for each leave category
+            </p>
+          </div>
+          {canEditPolicy && (
+            <button
+              onClick={() => (editingPolicy ? void savePolicy() : setEditingPolicy(true))}
+              disabled={savingPolicy}
+              className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded-xl hover:bg-green-700 transition-all disabled:opacity-60"
+              style={{ fontSize: '13px', fontWeight: 600 }}
+            >
+              {editingPolicy ? <Save className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
+              {editingPolicy ? 'Save Policy' : 'Edit Policy'}
+            </button>
+          )}
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              ['Sick Leave Days', 'sickLeaveDays'],
+              ['Emergency Leave Days', 'emergencyLeaveDays'],
+              ['Casual Leave Days', 'casualLeaveDays'],
+              ['Annual Leave Days', 'annualLeaveDays'],
+              ['Casual Leave Notice (Hours)', 'casualLeaveNoticeHours'],
+              ['Annual Leave Notice (Hours)', 'annualLeaveNoticeHours'],
+            ].map(([label, key]) => (
+              <label key={key} className="text-sm text-gray-600">
+                {label}
+                {editingPolicy ? (
+                  <input
+                    type="number"
+                    min={0}
+                    value={policy[key as keyof PolicySettings] as number}
+                    onChange={(event) =>
+                      setPolicy((value) => ({
+                        ...value,
+                        [key]: Number(event.target.value),
+                      }))
+                    }
+                    className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                ) : (
+                  <div className="mt-1 px-3 py-2 rounded-xl bg-gray-50 text-gray-900">
+                    {policy[key as keyof PolicySettings]}
+                  </div>
+                )}
+              </label>
+            ))}
+          </div>
+
+          <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl p-3">
+            <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+            <div className="w-full">
+              <p className="text-blue-700 mb-2" style={{ fontSize: '12px', fontWeight: 600 }}>
+                Policy Notes
+              </p>
+              {editingPolicy ? (
+                <textarea
+                  rows={5}
+                  value={policy.leavePolicyNotes}
+                  onChange={(event) => setPolicy((value) => ({ ...value, leavePolicyNotes: event.target.value }))}
+                  className="w-full px-3 py-2 border border-blue-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500 resize-none"
+                  style={{ fontSize: '13px', lineHeight: '1.6' }}
+                />
+              ) : (
+                <p className="text-blue-600 whitespace-pre-line" style={{ fontSize: '12px', lineHeight: '1.6' }}>
+                  {policy.leavePolicyNotes}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {!editingPolicy && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-gray-700">
+                Sick and Emergency leave do not require notice hours.
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-gray-700">
+                Casual requires {policy.casualLeaveNoticeHours} hours notice. Annual requires {policy.annualLeaveNoticeHours} hours notice.
+              </div>
+            </div>
+          )}
+
+          {policyError && (
+            <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-600">
+              {policyError}
+            </div>
+          )}
+        </div>
+      </div>
+
       {showForm && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
           <div className="bg-gradient-to-r from-green-600 to-green-500 px-5 py-4">
@@ -136,8 +292,8 @@ export default function LeaveRequestPage() {
               {/* Leave type */}
               <div>
                 <label className="block text-gray-700 mb-2" style={{ fontSize: '14px', fontWeight: 500 }}>Leave Type</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['sick', 'casual', 'annual'] as LeaveType[]).map((type) => {
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {(['sick', 'emergency', 'casual', 'annual'] as LeaveType[]).map((type) => {
                     const colors = getLeaveTypeColor(type);
                     return (
                       <button
@@ -236,7 +392,7 @@ export default function LeaveRequestPage() {
                 <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                 <p className="text-blue-600" style={{ fontSize: '12px', lineHeight: '1.5' }}>
                   Leave requests require approval from your Line Manager and Director before they are confirmed.
-                  Please submit requests at least 48 hours in advance for casual and annual leave.
+                  Sick and emergency leave do not require notice hours. Casual leave requires {policy.casualLeaveNoticeHours} hours notice and annual leave requires {policy.annualLeaveNoticeHours} hours notice.
                 </p>
               </div>
 

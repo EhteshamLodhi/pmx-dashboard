@@ -35,7 +35,7 @@ interface AppContextType {
   addUser: (user: Omit<User, 'id' | 'joinDate' | 'isActive' | 'position'> & { position?: string }) => Promise<void>;
   getTodayRecord: (userId?: string) => AttendanceRecord | undefined;
   getAttendanceForUser: (userId: string) => AttendanceRecord[];
-  refreshData: () => Promise<void>;
+  refreshData: (options?: { showLoading?: boolean }) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -59,6 +59,16 @@ function getTotalHours(checkIn?: string, checkOut?: string) {
   return totalMinutes > 0 ? Math.round((totalMinutes / 60) * 100) / 100 : undefined;
 }
 
+function getLeaveDays(startDate: string, endDate: string) {
+  return Math.floor((Date.parse(endDate) - Date.parse(startDate)) / 86_400_000) + 1;
+}
+
+function notificationVibration(category?: string) {
+  if (category === 'approval') return [300, 120, 300, 120, 600];
+  if (category === 'attendance') return [250, 100, 250, 100, 250];
+  return [200, 100, 200, 100, 400];
+}
+
 async function parseApiError(response: Response) {
   try {
     const body = await response.json();
@@ -75,6 +85,25 @@ function urlBase64ToUint8Array(value: string) {
   const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
   const rawData = window.atob(base64);
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+}
+
+function upsertById<T extends { id: string }>(items: T[], item: T) {
+  const exists = items.some((candidate) => candidate.id === item.id);
+  return exists ? items.map((candidate) => (candidate.id === item.id ? item : candidate)) : [item, ...items];
+}
+
+function applyRolePosition(user: User): User {
+  return {
+    ...user,
+    position:
+      user.role === 'admin'
+        ? 'System Administrator'
+        : user.role === 'director'
+          ? 'Director'
+          : user.role === 'manager'
+            ? 'Manager'
+            : 'Employee',
+  };
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -114,7 +143,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const syncSession = useCallback(
-    async (supabase: SupabaseClient, session: Session | null) => {
+    async (supabase: SupabaseClient, session: Session | null, options: { showLoading?: boolean } = {}) => {
       if (!session?.user) {
         setCurrentUser(null);
         setUsers([]);
@@ -126,7 +155,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      setIsLoading(true);
+      if (options.showLoading) {
+        setIsLoading(true);
+      }
 
       try {
         await bootstrapProfile();
@@ -135,7 +166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const [usersResult, attendanceResult, leaveResult, notificationResult] = await Promise.allSettled([
           supabase
             .from('users')
-            .select('*, department:department_id(name), project:project_id(name)')
+            .select('*, project:project_id(name)')
             .order('full_name'),
           supabase
             .from('attendance_logs')
@@ -145,7 +176,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             .from('leave_requests')
             .select(`
               *,
-              employee:employee_id(full_name, department:department_id(name)),
+              employee:employee_id(full_name, project:project_id(name)),
               approval_workflow(
                 approval_level,
                 approver_id,
@@ -212,13 +243,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setCurrentUser(null);
         setIsLoggedIn(false);
       } finally {
-        setIsLoading(false);
+        if (options.showLoading) {
+          setIsLoading(false);
+        }
       }
     },
     [bootstrapProfile, fetchCurrentProfile],
   );
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (options: { showLoading?: boolean } = {}) => {
     const supabase = createClient();
     if (!supabase) return;
 
@@ -226,7 +259,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       data: { session },
     } = await supabase.auth.getSession();
 
-    await syncSession(supabase, session);
+    await syncSession(supabase, session, options);
   }, [syncSession]);
 
   useEffect(() => {
@@ -251,7 +284,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } = await supabase.auth.getSession();
 
       if (!mounted) return;
-      await syncSession(supabase, session);
+      await syncSession(supabase, session, { showLoading: true });
     };
 
     void initialize();
@@ -259,7 +292,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      void syncSession(supabase, session);
+      void syncSession(supabase, session, { showLoading: !session });
     });
 
     return () => {
@@ -282,20 +315,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
           table: 'notifications',
           filter: `user_id=eq.${currentUser.id}`,
         },
-        (payload) => {
-          if (payload.eventType === 'INSERT' && 'Notification' in window && Notification.permission === 'granted') {
-            const row = payload.new as { title?: string; message?: string; link?: string };
-            navigator.serviceWorker.ready
-              .then((registration) =>
-                registration.showNotification(row.title ?? 'PowerMatix', {
-                  body: row.message ?? 'You have a new notification.',
-                  icon: '/icon.svg',
-                  data: { link: row.link ?? '/dashboard' },
-                }),
-              )
-              .catch(() => undefined);
+          (payload) => {
+            if (payload.eventType === 'INSERT' && 'Notification' in window && Notification.permission === 'granted') {
+              const row = payload.new as { title?: string; message?: string; link?: string; category?: string; id?: string };
+              if ('vibrate' in navigator) {
+                navigator.vibrate(notificationVibration(row.category));
+              }
+              navigator.serviceWorker.ready
+                .then((registration) => {
+                  const options = {
+                    body: row.message ?? 'You have a new notification.',
+                    icon: '/icon.svg',
+                    badge: '/maskable-icon.svg',
+                    requireInteraction: row.category === 'approval' || row.category === 'attendance',
+                    tag: row.id ?? row.category ?? 'powermatix-notification',
+                    vibrate: notificationVibration(row.category),
+                    data: { link: row.link ?? '/dashboard' },
+                  } as NotificationOptions;
+                  return registration.showNotification(row.title ?? 'PowerMatix', options);
+                })
+                .catch(() => undefined);
+            }
+          if (payload.eventType === 'INSERT') {
+            setNotifications((items) => upsertById(items, mapNotification(payload.new as Parameters<typeof mapNotification>[0])));
+            return;
           }
-          void refreshData();
+
+          if (payload.eventType === 'UPDATE') {
+            setNotifications((items) =>
+              items.map((item) =>
+                item.id === (payload.new as { id?: string }).id
+                  ? mapNotification(payload.new as Parameters<typeof mapNotification>[0])
+                  : item,
+              ),
+            );
+            return;
+          }
+
+          if (payload.eventType === 'DELETE') {
+            setNotifications((items) => items.filter((item) => item.id !== (payload.old as { id?: string }).id));
+          }
         },
       )
       .subscribe();
@@ -340,6 +399,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const markNotificationRead = useCallback(
     async (id: string) => {
+      const previous = notifications;
+      setNotifications((items) => items.map((notification) => (notification.id === id ? { ...notification, isRead: true } : notification)));
+
       const response = await fetch('/api/notifications', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -347,13 +409,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ id }),
       });
 
-      if (!response.ok) throw new Error(await parseApiError(response));
-      await refreshData();
+      if (!response.ok) {
+        setNotifications(previous);
+        throw new Error(await parseApiError(response));
+      }
     },
-    [refreshData],
+    [notifications],
   );
 
   const markAllNotificationsRead = useCallback(async () => {
+    const previous = notifications;
+    setNotifications((items) => items.map((notification) => ({ ...notification, isRead: true })));
+
     const response = await fetch('/api/notifications', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -361,9 +428,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ markAllRead: true }),
     });
 
-    if (!response.ok) throw new Error(await parseApiError(response));
-    await refreshData();
-  }, [refreshData]);
+    if (!response.ok) {
+      setNotifications(previous);
+      throw new Error(await parseApiError(response));
+    }
+  }, [notifications]);
 
   const enablePushNotifications = useCallback(async () => {
     if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -405,6 +474,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const checkIn = useCallback(async () => {
     if (!currentUser) throw new Error('No active user session found.');
 
+    const previous = attendanceRecords;
+    const optimisticRecord: AttendanceRecord = {
+      id: `optimistic-check-in-${currentUser.id}-${today}`,
+      userId: currentUser.id,
+      date: today,
+      checkIn: toTimeString(new Date()),
+      status: getAttendanceStatus(currentUser, toTimeString(new Date())),
+    };
+
+    setAttendanceRecords((records) => [
+      optimisticRecord,
+      ...records.filter((record) => !(record.userId === currentUser.id && record.date === today)),
+    ]);
+
     const response = await fetch('/api/attendance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -413,14 +496,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
+      setAttendanceRecords(previous);
       throw new Error(await parseApiError(response));
     }
 
-    await refreshData();
-  }, [currentUser, refreshData]);
+    const body = (await response.json()) as { data?: Parameters<typeof mapAttendanceRecord>[0] };
+    if (body.data) {
+      const serverRecord = mapAttendanceRecord(body.data);
+      setAttendanceRecords((records) => upsertById(records.filter((record) => record.id !== optimisticRecord.id), serverRecord));
+    }
+
+    void refreshData();
+  }, [attendanceRecords, currentUser, getAttendanceStatus, refreshData, today]);
 
   const checkOut = useCallback(async () => {
     if (!currentUser) throw new Error('No active user session found.');
+
+    const previous = attendanceRecords;
+    const existing = getTodayRecord(currentUser.id);
+    if (existing) {
+      const checkOut = toTimeString(new Date());
+      setAttendanceRecords((records) =>
+        records.map((record) =>
+          record.id === existing.id
+            ? {
+                ...record,
+                checkOut,
+                totalHours: getTotalHours(record.checkIn, checkOut),
+                status: record.status === 'late' ? 'late' : 'present',
+              }
+            : record,
+        ),
+      );
+    }
 
     const response = await fetch('/api/attendance', {
       method: 'POST',
@@ -430,11 +538,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     if (!response.ok) {
+      setAttendanceRecords(previous);
       throw new Error(await parseApiError(response));
     }
 
-    await refreshData();
-  }, [currentUser, refreshData]);
+    const body = (await response.json()) as { data?: Parameters<typeof mapAttendanceRecord>[0] };
+    if (body.data) {
+      setAttendanceRecords((records) => upsertById(records, mapAttendanceRecord(body.data!)));
+    }
+
+    void refreshData();
+  }, [attendanceRecords, currentUser, getTodayRecord, refreshData]);
 
   const submitLeaveRequest = useCallback(
     async (data: { type: LeaveType; startDate: string; endDate: string; reason: string }) => {
@@ -451,9 +565,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(await parseApiError(response));
       }
 
-      await refreshData();
+      const body = (await response.json()) as { data?: { id: string; submitted_at?: string } };
+      if (body.data && currentUser) {
+        const manager = users.find((user) => user.id === currentUser.lineManagerId);
+        const director = users.find((user) => user.id === currentUser.directorId);
+        const optimisticLeave: LeaveRequest = {
+          id: body.data.id,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userProject: currentUser.project ?? 'Unassigned',
+          type: data.type,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          totalDays: getLeaveDays(data.startDate, data.endDate),
+          reason: data.reason,
+          status: 'pending_manager',
+          submittedAt: body.data.submitted_at ?? new Date().toISOString(),
+          approvals: [
+            {
+              level: 1,
+              approverId: currentUser.lineManagerId ?? '',
+              approverName: manager?.name ?? 'Line Manager',
+              role: 'Line Manager',
+              status: 'pending',
+            },
+            {
+              level: 2,
+              approverId: currentUser.directorId ?? '',
+              approverName: director?.name ?? 'Director',
+              role: 'Director',
+              status: 'pending',
+            },
+          ],
+        };
+        setLeaveRequests((requests) => upsertById(requests, optimisticLeave));
+      }
+
+      void refreshData();
     },
-    [refreshData],
+    [currentUser, refreshData, users],
   );
 
   const approveLeave = useCallback(
@@ -476,7 +626,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(await parseApiError(response));
       }
 
-      await refreshData();
+      const actedAt = new Date().toISOString();
+      setLeaveRequests((requests) =>
+        requests.map((request) => {
+          if (request.id !== leaveId) return request;
+          return {
+            ...request,
+            status: approved ? (level === 1 ? 'pending_director' : 'approved') : 'rejected',
+            approvals: request.approvals.map((approval) =>
+              approval.level === level
+                ? {
+                    ...approval,
+                    status: approved ? 'approved' : 'rejected',
+                    comment: comment.trim() || undefined,
+                    timestamp: actedAt,
+                  }
+                : approval,
+            ),
+          };
+        }),
+      );
+      void refreshData();
     },
     [refreshData],
   );
@@ -508,14 +678,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify(payload),
         });
 
-        if (!response.ok) throw new Error(await parseApiError(response));
+      if (!response.ok) throw new Error(await parseApiError(response));
+
+        const body = (await response.json()) as { data?: Parameters<typeof mapAttendanceRecord>[0] };
+        if (body.data) {
+          setAttendanceRecords((records) => upsertById(records, mapAttendanceRecord(body.data!)));
+        }
       } else {
         const { id: _id, ...directPayload } = payload;
         const { error } = await supabase.from('attendance_logs').update(directPayload).eq('id', id);
         if (error) throw error;
+        setAttendanceRecords((records) =>
+          records.map((record) => (record.id === id ? { ...record, ...updates, editedBy: currentUser.name, editedAt: payload.edited_at } : record)),
+        );
       }
 
-      await refreshData();
+      void refreshData();
     },
     [currentUser, refreshData, today],
   );
@@ -552,9 +730,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
 
           if (!response.ok) throw new Error(await parseApiError(response));
+          const body = (await response.json()) as { data?: Parameters<typeof mapAttendanceRecord>[0] };
+          if (body.data) {
+            setAttendanceRecords((records) => upsertById(records, mapAttendanceRecord(body.data!)));
+          }
         } else {
           const { error } = await supabase.from('attendance_logs').update(payload).eq('id', existing.id);
           if (error) throw error;
+          setAttendanceRecords((records) =>
+            records.map((item) =>
+              item.id === existing.id
+                ? {
+                    ...item,
+                    ...record,
+                    editedBy: currentUser.name,
+                    editedAt: payload.edited_at,
+                  }
+                : item,
+            ),
+          );
         }
       } else if (currentUser.role === 'admin') {
         const response = await fetch('/api/admin/attendance', {
@@ -565,12 +759,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
 
         if (!response.ok) throw new Error(await parseApiError(response));
+        const body = (await response.json()) as { data?: Parameters<typeof mapAttendanceRecord>[0] };
+        if (body.data) {
+          setAttendanceRecords((records) => upsertById(records, mapAttendanceRecord(body.data!)));
+        }
       } else {
         const { error } = await supabase.from('attendance_logs').insert(payload);
         if (error) throw error;
       }
 
-      await refreshData();
+      void refreshData();
     },
     [attendanceRecords, currentUser, refreshData, users],
   );
@@ -596,7 +794,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           throw new Error(await parseApiError(response));
         }
 
-        await refreshData();
+        const nextUser = applyRolePosition({
+          ...(users.find((user) => user.id === userId) ?? currentUser),
+          ...updates,
+          id: userId,
+        } as User);
+        setUsers((items) => items.map((item) => (item.id === userId ? nextUser : item)));
+        if (currentUser.id === userId) setCurrentUser(nextUser);
+        void refreshData();
         return;
       }
 
@@ -619,9 +824,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(await parseApiError(response));
       }
 
-      await refreshData();
+      setCurrentUser((user) => (user ? { ...user, phone: updates.phone } : user));
+      setUsers((items) => items.map((item) => (item.id === userId ? { ...item, phone: updates.phone } : item)));
+      void refreshData();
     },
-    [currentUser, refreshData],
+    [currentUser, refreshData, users],
   );
 
   const updateUserHierarchy = useCallback(
@@ -646,7 +853,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error(await parseApiError(response));
       }
 
-      await refreshData();
+      const body = (await response.json()) as { data?: Parameters<typeof mapUser>[0] };
+      if (body.data) {
+        const createdUser = mapUser(body.data);
+        setUsers((items) => upsertById(items, createdUser));
+      }
+      void refreshData();
     },
     [refreshData],
   );

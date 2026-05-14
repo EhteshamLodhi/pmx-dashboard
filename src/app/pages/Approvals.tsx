@@ -18,6 +18,7 @@ import { LeaveRequest } from '../types';
 function getLeaveTypeLabel(type: string) {
   switch (type) {
     case 'sick': return 'Sick Leave';
+    case 'emergency': return 'Emergency Leave';
     case 'casual': return 'Casual Leave';
     case 'annual': return 'Annual Leave';
     default: return type;
@@ -27,6 +28,7 @@ function getLeaveTypeLabel(type: string) {
 function getLeaveTypeColor(type: string) {
   switch (type) {
     case 'sick': return 'bg-red-50 text-red-600';
+    case 'emergency': return 'bg-rose-50 text-rose-600';
     case 'casual': return 'bg-blue-50 text-blue-600';
     case 'annual': return 'bg-purple-50 text-purple-600';
     default: return 'bg-gray-50 text-gray-600';
@@ -183,7 +185,7 @@ function RequestCard({
                   {getLeaveTypeLabel(request.type)}
                 </span>
               </div>
-              <p className="text-gray-500 mt-0.5" style={{ fontSize: '12px' }}>{request.userDepartment}</p>
+              <p className="text-gray-500 mt-0.5" style={{ fontSize: '12px' }}>{request.userProject}</p>
             </div>
           </div>
           <button

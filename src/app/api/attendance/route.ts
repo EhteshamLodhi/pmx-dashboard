@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAuthenticatedUser } from '@/server/auth';
 import { requireSupabase } from '@/server/responses';
+import { createNotification, createRoleNotification } from '@/server/notifications';
+import { formatDisplayTime } from '@/lib/time';
 
 function localNow() {
   const now = new Date();
@@ -36,7 +38,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('attendance_logs')
-    .select('*, users:employee_id(full_name, email, department_id, reporting_time)')
+    .select('*, users:employee_id(full_name, email, project_id, reporting_time)')
     .order('work_date', { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -55,7 +57,7 @@ export async function POST(request: Request) {
 
     const { data: appUser, error: userError } = await admin
       .from('users')
-      .select('id, reporting_time, check_in_grace_minutes, is_active')
+      .select('id, full_name, reporting_time, check_in_grace_minutes, line_manager_id, is_active')
       .eq('id', authResult.user.id)
       .maybeSingle();
 
@@ -91,6 +93,27 @@ export async function POST(request: Request) {
 
       const { data, error } = await query.select().single();
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+      const checkInTime = localTime();
+      if (appUser.line_manager_id) {
+        await createNotification(admin, {
+          userId: appUser.line_manager_id,
+          category: 'attendance',
+          title: `${appUser.full_name} checked in`,
+          message: `${appUser.full_name} checked in at ${formatDisplayTime(checkInTime)}.${status === 'late' ? ' Marked late.' : ''}`,
+          link: '/admin/attendance',
+          sourceKey: `manager-check-in:${workDate}:${authResult.user.id}:${appUser.line_manager_id}`,
+        });
+      }
+
+      await createRoleNotification(admin, ['director'], {
+        category: 'attendance',
+        title: 'Employee check-in recorded',
+        message: `${appUser.full_name} checked in at ${formatDisplayTime(checkInTime)}.${status === 'late' ? ' Marked late.' : ''}`,
+        link: '/admin/attendance',
+        sourceKey: `director-check-in:${workDate}:${authResult.user.id}`,
+      });
+
       return NextResponse.json({ data }, { status: existing?.id ? 200 : 201 });
     }
 
@@ -111,6 +134,27 @@ export async function POST(request: Request) {
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+    const checkOutTime = localTime();
+    if (appUser.line_manager_id) {
+      await createNotification(admin, {
+        userId: appUser.line_manager_id,
+        category: 'attendance',
+        title: `${appUser.full_name} checked out`,
+        message: `${appUser.full_name} checked out at ${formatDisplayTime(checkOutTime)} after ${Number(totalHours.toFixed(2))} hour(s).`,
+        link: '/admin/attendance',
+        sourceKey: `manager-check-out:${workDate}:${authResult.user.id}:${appUser.line_manager_id}`,
+      });
+    }
+
+    await createRoleNotification(admin, ['director'], {
+      category: 'attendance',
+      title: 'Employee check-out recorded',
+      message: `${appUser.full_name} checked out at ${formatDisplayTime(checkOutTime)} after ${Number(totalHours.toFixed(2))} hour(s).`,
+      link: '/admin/attendance',
+      sourceKey: `director-check-out:${workDate}:${authResult.user.id}`,
+    });
+
     return NextResponse.json({ data });
   }
 

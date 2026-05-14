@@ -18,12 +18,12 @@ type DbUserRow = {
   full_name: string;
   email: string;
   role: UserRole;
-  department_id?: string | null;
   project_id?: string | null;
   reporting_time?: string | null;
   check_in_grace_minutes?: number | null;
   check_out_reminder_time?: string | null;
   sick_leave_days?: number | null;
+  emergency_leave_days?: number | null;
   casual_leave_days?: number | null;
   annual_leave_days?: number | null;
   line_manager_id?: string | null;
@@ -32,7 +32,6 @@ type DbUserRow = {
   phone?: string | null;
   is_active?: boolean | null;
   joined_at?: string | null;
-  department?: { name?: string | null } | null;
   project?: { name?: string | null } | null;
 };
 
@@ -72,7 +71,7 @@ type DbLeaveRow = {
   submitted_at: string;
   employee?: {
     full_name?: string | null;
-    department?: { name?: string | null } | null;
+    project?: { name?: string | null } | null;
   } | null;
   approval_workflow?: DbApprovalRow[] | null;
 };
@@ -106,8 +105,7 @@ export function mapUser(row: DbUserRow): User {
     name: row.full_name,
     email: row.email,
     role: row.role,
-    department: row.department?.name ?? row.department_id ?? 'Unassigned',
-    project: row.project?.name ?? row.project_id ?? undefined,
+    project: row.project?.name ?? row.project_id ?? 'Unassigned',
     position:
       row.role === 'admin'
         ? 'System Administrator'
@@ -120,6 +118,7 @@ export function mapUser(row: DbUserRow): User {
     checkInGraceMinutes: row.check_in_grace_minutes ?? 15,
     checkOutReminderTime: formatTime(row.check_out_reminder_time) ?? '19:00',
     sickLeaveDays: row.sick_leave_days ?? 10,
+    emergencyLeaveDays: row.emergency_leave_days ?? 5,
     casualLeaveDays: row.casual_leave_days ?? 10,
     annualLeaveDays: row.annual_leave_days ?? 14,
     lineManagerId: row.line_manager_id ?? undefined,
@@ -163,7 +162,7 @@ export function mapLeaveRequest(row: DbLeaveRow): LeaveRequest {
     id: row.id,
     userId: row.employee_id,
     userName: row.employee?.full_name ?? 'Unknown User',
-    userDepartment: row.employee?.department?.name ?? 'Unassigned',
+    userProject: row.employee?.project?.name ?? 'Unassigned',
     type: row.leave_type,
     startDate: row.start_date,
     endDate: row.end_date,

@@ -9,7 +9,7 @@ export async function GET() {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from('users')
-    .select('*, department:department_id(name), project:project_id(name)')
+    .select('*, project:project_id(name)')
     .eq('id', authResult.user.id)
     .maybeSingle();
 

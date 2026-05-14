@@ -22,6 +22,10 @@ function currentMinutes() {
   return now.getHours() * 60 + now.getMinutes();
 }
 
+function reminderRound(current: number, threshold: number) {
+  return Math.max(0, Math.floor((current - threshold) / 60));
+}
+
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   const providedSecret = request.headers.get('authorization')?.replace('Bearer ', '');
@@ -47,7 +51,7 @@ export async function GET(request: Request) {
 
   const { data: users, error: usersError } = await admin
     .from('users')
-    .select('id, full_name, reporting_time, check_in_grace_minutes, check_out_reminder_time, role, is_active')
+    .select('id, full_name, reporting_time, check_in_grace_minutes, check_out_reminder_time, line_manager_id, role, is_active')
     .eq('is_active', true);
 
   if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 });
@@ -77,22 +81,64 @@ export async function GET(request: Request) {
       sourceKey: `check-in:${workDate}:${user.id}`,
     }));
 
-  const checkOutNotifications = employeeUsers
+  const managerCheckInNotifications = employeeUsers
     .filter((user) => {
+      const userGraceMinutes = user.check_in_grace_minutes ?? graceMinutes;
+      const threshold = minutesFromTime(user.reporting_time ?? '09:00') + userGraceMinutes;
       const record = attendanceByUser.get(user.id);
-      const userCheckoutReminderTime = user.check_out_reminder_time ?? checkoutReminderTime;
-      return nowMinutes >= minutesFromTime(userCheckoutReminderTime) && Boolean(record?.check_in_at) && !record?.check_out_at;
+      return Boolean(user.line_manager_id) && nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave';
     })
     .map((user) => ({
-      userId: user.id,
+      userId: user.line_manager_id as string,
       category: 'attendance' as const,
-      title: 'Check-out reminder',
-      message: 'You forgot to check out today.',
-      link: '/attendance',
-      sourceKey: `check-out:${workDate}:${user.id}`,
+      title: 'Employee check-in reminder',
+      message: `${user.full_name} has not checked in today.`,
+      link: '/admin/attendance',
+      sourceKey: `manager-check-in-reminder:${workDate}:${user.id}:${user.line_manager_id}`,
     }));
 
-  await createNotifications(admin, [...checkInNotifications, ...checkOutNotifications]);
+  const checkOutNotifications = employeeUsers
+    .flatMap((user) => {
+      const record = attendanceByUser.get(user.id);
+      const userCheckoutReminderTime = user.check_out_reminder_time ?? checkoutReminderTime;
+      const threshold = minutesFromTime(userCheckoutReminderTime);
+      if (!(nowMinutes >= threshold && Boolean(record?.check_in_at) && !record?.check_out_at)) return [];
+      const round = reminderRound(nowMinutes, threshold);
+      return [{
+        userId: user.id,
+        category: 'attendance' as const,
+        title: round === 0 ? 'Check-out reminder' : 'Hourly check-out reminder',
+        message: round === 0
+          ? 'You forgot to check out today.'
+          : 'You are still checked in. If you are doing a late sitting, please log out your time when you finish.',
+        link: '/attendance',
+        sourceKey: `check-out:${workDate}:${user.id}:${round}`,
+      }];
+    });
+
+  const managerCheckOutNotifications = employeeUsers
+    .flatMap((user) => {
+      const record = attendanceByUser.get(user.id);
+      const userCheckoutReminderTime = user.check_out_reminder_time ?? checkoutReminderTime;
+      const threshold = minutesFromTime(userCheckoutReminderTime);
+      if (!(user.line_manager_id && nowMinutes >= threshold && Boolean(record?.check_in_at) && !record?.check_out_at)) return [];
+      const round = reminderRound(nowMinutes, threshold);
+      return [{
+        userId: user.line_manager_id,
+        category: 'attendance' as const,
+        title: round === 0 ? 'Employee check-out reminder' : 'Employee hourly check-out reminder',
+        message: `${user.full_name} is still checked in and has not checked out yet.`,
+        link: '/admin/attendance',
+        sourceKey: `manager-check-out-reminder:${workDate}:${user.id}:${user.line_manager_id}:${round}`,
+      }];
+    });
+
+  await createNotifications(admin, [
+    ...checkInNotifications,
+    ...managerCheckInNotifications,
+    ...checkOutNotifications,
+    ...managerCheckOutNotifications,
+  ]);
 
   if (checkInNotifications.length > 0) {
     await createRoleNotification(admin, ['admin'], {
@@ -108,5 +154,7 @@ export async function GET(request: Request) {
     ok: true,
     checkInReminders: checkInNotifications.length,
     checkOutReminders: checkOutNotifications.length,
+    managerCheckInReminders: managerCheckInNotifications.length,
+    managerCheckOutReminders: managerCheckOutNotifications.length,
   });
 }

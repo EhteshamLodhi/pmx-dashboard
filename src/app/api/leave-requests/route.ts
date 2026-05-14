@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireSupabase } from '@/server/responses';
 import { requireAuthenticatedUser } from '@/server/auth';
-import { createNotification } from '@/server/notifications';
+import { createNotification, createRoleNotification } from '@/server/notifications';
 
-const leaveTypes = ['sick', 'casual', 'annual'] as const;
+const leaveTypes = ['sick', 'emergency', 'casual', 'annual'] as const;
 type LeaveType = (typeof leaveTypes)[number];
 
 function localNow() {
@@ -33,12 +33,31 @@ function leaveDaysBetween(startDate: string, endDate: string) {
 }
 
 function leaveAllowance(
-  employee: { sick_leave_days?: number | null; casual_leave_days?: number | null; annual_leave_days?: number | null },
+  employee: {
+    sick_leave_days?: number | null;
+    emergency_leave_days?: number | null;
+    casual_leave_days?: number | null;
+    annual_leave_days?: number | null;
+  },
   type: LeaveType,
 ) {
   if (type === 'sick') return employee.sick_leave_days ?? 10;
+  if (type === 'emergency') return employee.emergency_leave_days ?? 5;
   if (type === 'casual') return employee.casual_leave_days ?? 10;
   return employee.annual_leave_days ?? 14;
+}
+
+function leaveTypeLabel(type: LeaveType) {
+  switch (type) {
+    case 'sick':
+      return 'sick';
+    case 'emergency':
+      return 'emergency';
+    case 'casual':
+      return 'casual';
+    case 'annual':
+      return 'annual';
+  }
 }
 
 export async function GET() {
@@ -79,24 +98,29 @@ export async function POST(request: Request) {
 
   const { data: settings, error: settingsError } = await admin
     .from('attendance_settings')
-    .select('minimum_leave_notice_hours')
+    .select('casual_leave_notice_hours, annual_leave_notice_hours')
     .limit(1)
     .maybeSingle();
 
   if (settingsError) return NextResponse.json({ error: settingsError.message }, { status: 500 });
 
-  const minimumLeaveNoticeHours = settings?.minimum_leave_notice_hours ?? 48;
+  const minimumLeaveNoticeHours =
+    leaveType === 'casual'
+      ? settings?.casual_leave_notice_hours ?? 48
+      : leaveType === 'annual'
+        ? settings?.annual_leave_notice_hours ?? 48
+        : 0;
   const requestedStart = dateAtLocalMidnight(startDate);
   if (minimumLeaveNoticeHours > 0 && requestedStart.getTime() - localNow().getTime() < minimumLeaveNoticeHours * 3_600_000) {
     return NextResponse.json(
-      { error: `Leave requests require at least ${minimumLeaveNoticeHours} hours notice.` },
+      { error: `${leaveTypeLabel(leaveType)} leave requests require at least ${minimumLeaveNoticeHours} hours notice.` },
       { status: 400 },
     );
   }
 
   const { data: employee, error: employeeError } = await admin
     .from('users')
-    .select('id, line_manager_id, director_id, sick_leave_days, casual_leave_days, annual_leave_days')
+    .select('id, full_name, line_manager_id, director_id, sick_leave_days, emergency_leave_days, casual_leave_days, annual_leave_days')
     .eq('id', authResult.user.id)
     .maybeSingle();
 
@@ -179,6 +203,14 @@ export async function POST(request: Request) {
     sourceKey: `leave-submitted:${data.id}:manager`,
   });
 
+  await createRoleNotification(admin, ['director'], {
+    category: 'approval',
+    title: 'Leave request submitted',
+    message: `${employee.full_name} submitted a ${leaveType} leave request for ${startDate} to ${endDate}.`,
+    link: '/approvals',
+    sourceKey: `leave-submitted:${data.id}:director`,
+  });
+
   return NextResponse.json({ data }, { status: 201 });
 }
 
@@ -257,23 +289,13 @@ export async function PATCH(request: Request) {
   }
 
   if (approved && level === 1) {
-    const { data: directorStep } = await admin
-      .from('approval_workflow')
-      .select('approver_id')
-      .eq('leave_request_id', leaveId)
-      .eq('approval_level', 2)
-      .maybeSingle();
-
-    if (directorStep?.approver_id) {
-      await createNotification(admin, {
-        userId: directorStep.approver_id,
-        category: 'approval',
-        title: 'Director approval pending',
-        message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for final approval.`,
-        link: '/approvals',
-        sourceKey: `leave-manager-approved:${leaveId}:director`,
-      });
-    }
+    await createRoleNotification(admin, ['director'], {
+      category: 'approval',
+      title: 'Director approval pending',
+      message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for final approval.`,
+      link: '/approvals',
+      sourceKey: `leave-manager-approved:${leaveId}:director`,
+    });
   }
 
   if (!approved || level === 2) {

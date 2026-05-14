@@ -1,5 +1,11 @@
-const CACHE_NAME = 'powermatix-attendance-shell-v2';
+const CACHE_NAME = 'powermatix-attendance-shell-v3';
 const APP_SHELL = ['/', '/dashboard', '/offline', '/manifest.json', '/manifest.webmanifest', '/icon.svg', '/maskable-icon.svg'];
+
+function notificationVibration(category) {
+  if (category === 'approval') return [300, 120, 300, 120, 600];
+  if (category === 'attendance') return [250, 100, 250, 100, 250];
+  return [200, 100, 200, 100, 400];
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -45,6 +51,7 @@ self.addEventListener('push', (event) => {
   const payload = event.data?.json?.() ?? {
     title: 'PowerMatix',
     message: 'You have a new notification.',
+    category: 'admin',
     link: '/dashboard',
   };
 
@@ -53,6 +60,10 @@ self.addEventListener('push', (event) => {
       body: payload.message || payload.body || 'You have a new notification.',
       icon: '/icon.svg',
       badge: '/maskable-icon.svg',
+      requireInteraction: payload.category === 'approval' || payload.category === 'attendance',
+      renotify: true,
+      tag: payload.tag || payload.category || 'powermatix-notification',
+      vibrate: payload.vibrate || notificationVibration(payload.category),
       data: {
         link: payload.link || '/dashboard',
       },
@@ -81,6 +92,8 @@ self.addEventListener('sync', (event) => {
     event.waitUntil(self.registration.showNotification('PowerMatix is back online', {
       body: 'Attendance changes can now sync with the portal.',
       icon: '/icon.svg',
+      badge: '/maskable-icon.svg',
+      vibrate: notificationVibration('attendance'),
       data: { link: '/attendance' },
     }));
   }

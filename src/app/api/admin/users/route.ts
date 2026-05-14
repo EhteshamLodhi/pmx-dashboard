@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireUserRole } from '@/server/auth';
 
-async function ensureDepartment(admin: ReturnType<typeof createAdminClient>, name?: string | null) {
+async function ensureProject(admin: ReturnType<typeof createAdminClient>, name?: string | null) {
   const trimmed = name?.trim();
   if (!trimmed) return null;
 
   const { data: existing, error: existingError } = await admin
-    .from('departments')
+    .from('projects')
     .select('id')
     .eq('name', trimmed)
     .maybeSingle();
@@ -16,38 +16,8 @@ async function ensureDepartment(admin: ReturnType<typeof createAdminClient>, nam
   if (existing) return existing.id;
 
   const { data: created, error: createError } = await admin
-    .from('departments')
+    .from('projects')
     .insert({ name: trimmed })
-    .select('id')
-    .single();
-
-  if (createError) throw createError;
-  return created.id;
-}
-
-async function ensureProject(
-  admin: ReturnType<typeof createAdminClient>,
-  name?: string | null,
-  departmentId?: string | null,
-) {
-  const trimmed = name?.trim();
-  if (!trimmed) return null;
-
-  const { data: existing, error: existingError } = await admin
-    .from('projects')
-    .select('id')
-    .eq('name', trimmed)
-    .maybeSingle();
-
-  if (existingError) throw existingError;
-  if (existing) return existing.id;
-
-  const { data: created, error: createError } = await admin
-    .from('projects')
-    .insert({
-      name: trimmed,
-      department_id: departmentId ?? null,
-    })
     .select('id')
     .single();
 
@@ -61,7 +31,7 @@ export async function GET() {
 
   const { data, error } = await authResult.admin
     .from('users')
-    .select('*, department:department_id(name), project:project_id(name)')
+    .select('*, project:project_id(name)')
     .order('full_name');
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -74,8 +44,7 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const admin = authResult.admin;
-  const departmentId = await ensureDepartment(admin, body.department);
-  const projectId = await ensureProject(admin, body.project, departmentId);
+  const projectId = await ensureProject(admin, body.project);
 
   const { data: authUsers, error: authUsersError } = await admin.auth.admin.listUsers({
     page: 1,
@@ -104,12 +73,12 @@ export async function POST(request: Request) {
       full_name: String(body.name ?? '').trim() || matchingAuthUser.email,
       email: String(body.email ?? '').trim().toLowerCase(),
       role: body.role,
-      department_id: departmentId,
       project_id: projectId,
       reporting_time: body.reportingTime || '09:00',
       check_in_grace_minutes: Number(body.checkInGraceMinutes ?? 15),
       check_out_reminder_time: body.checkOutReminderTime || '19:00',
       sick_leave_days: Number(body.sickLeaveDays ?? 10),
+      emergency_leave_days: Number(body.emergencyLeaveDays ?? 5),
       casual_leave_days: Number(body.casualLeaveDays ?? 10),
       annual_leave_days: Number(body.annualLeaveDays ?? 14),
       line_manager_id: body.lineManagerId || null,
@@ -130,14 +99,13 @@ export async function PATCH(request: Request) {
 
   const admin = authResult.admin;
   const body = await request.json();
-  const { id, department, project, ...updates } = body;
+  const { id, project, ...updates } = body;
 
   if (!id) {
     return NextResponse.json({ error: 'User id is required.' }, { status: 400 });
   }
 
-  const departmentId = department !== undefined ? await ensureDepartment(admin, department) : undefined;
-  const projectId = project !== undefined ? await ensureProject(admin, project, departmentId ?? null) : undefined;
+  const projectId = project !== undefined ? await ensureProject(admin, project) : undefined;
 
   const payload: Record<string, unknown> = {
     full_name: updates.name,
@@ -147,6 +115,7 @@ export async function PATCH(request: Request) {
     check_in_grace_minutes: updates.checkInGraceMinutes,
     check_out_reminder_time: updates.checkOutReminderTime,
     sick_leave_days: updates.sickLeaveDays,
+    emergency_leave_days: updates.emergencyLeaveDays,
     casual_leave_days: updates.casualLeaveDays,
     annual_leave_days: updates.annualLeaveDays,
     line_manager_id: updates.lineManagerId || null,
@@ -156,7 +125,6 @@ export async function PATCH(request: Request) {
     is_active: updates.isActive,
   };
 
-  if (department !== undefined) payload.department_id = departmentId;
   if (project !== undefined) payload.project_id = projectId;
 
   Object.keys(payload).forEach((key) => {
