@@ -21,16 +21,23 @@ export async function POST() {
     return NextResponse.json({ error: 'No push subscription found for this account yet.' }, { status: 400 });
   }
 
-  await sendPushNotifications(admin, [
-    {
+  try {
+    await sendPushNotifications(admin, [
+      {
+        userId: authResult.user.id,
+        category: 'admin',
+        title: 'Push notifications are ready',
+        message: 'PowerMatix can now reach this device even when the app is in the background.',
+        link: '/dashboard',
+        tag: `push-test:${authResult.user.id}`,
+      },
+    ]);
+  } catch (error) {
+    console.error('Push test send failed', {
       userId: authResult.user.id,
-      category: 'admin',
-      title: 'Push notifications are ready',
-      message: 'PowerMatix can now reach this device even when the app is in the background.',
-      link: '/dashboard',
-      tag: `push-test:${authResult.user.id}`,
-    },
-  ]);
+      error,
+    });
+  }
 
   return NextResponse.json({ ok: true, subscriptions: count });
 }

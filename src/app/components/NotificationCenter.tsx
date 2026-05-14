@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, CheckCheck, ExternalLink } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../context/AppContext';
@@ -42,6 +42,12 @@ export function NotificationCenter() {
   const [open, setOpen] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (pushNotificationsEnabled) {
+      setPushMessage('Push is enabled on this device.');
+    }
+  }, [pushNotificationsEnabled]);
+
   const handleNotificationClick = async (notification: AppNotification) => {
     if (!notification.isRead) await markNotificationRead(notification.id);
     setOpen(false);
@@ -49,9 +55,10 @@ export function NotificationCenter() {
   };
 
   const handleEnablePush = async () => {
+    setPushMessage(null);
     try {
       await enablePushNotifications();
-      setPushMessage('Push enabled');
+      setPushMessage('Push is enabled on this device.');
     } catch (error) {
       setPushMessage(error instanceof Error ? error.message : 'Unable to enable push notifications.');
     }

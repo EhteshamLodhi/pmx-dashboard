@@ -518,7 +518,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     if (!testResponse.ok) {
-      throw new Error(await parseApiError(testResponse));
+      console.warn('Push test request did not complete successfully', await parseApiError(testResponse));
     }
 
     await refreshPushStatus();
