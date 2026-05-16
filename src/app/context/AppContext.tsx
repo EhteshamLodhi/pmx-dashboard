@@ -20,7 +20,7 @@ interface AppContextType {
   logout: () => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
-  enablePushNotifications: () => Promise<void>;
+  enablePushNotifications: () => Promise<string>;
   checkIn: () => Promise<void>;
   checkOut: () => Promise<void>;
   submitLeaveRequest: (data: {
@@ -533,6 +533,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (!response.ok) throw new Error(await parseApiError(response));
 
+    try {
+      await registration.showNotification('PowerMatix browser notifications are enabled', {
+        body: 'This confirms your browser can display notifications from the app.',
+        icon: '/icon-192.png',
+        badge: '/badge-72.png',
+        tag: `push-local-test:${Date.now()}`,
+        data: { link: '/dashboard' },
+      });
+    } catch (error) {
+      console.error('Local browser notification test failed', error);
+    }
+
     const testResponse = await fetch('/api/push-subscriptions/test', {
       method: 'POST',
       credentials: 'include',
@@ -540,9 +552,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (!testResponse.ok) {
       console.warn('Push test request did not complete successfully', await parseApiError(testResponse));
+      await refreshPushStatus();
+      return 'Push is enabled on this device, but the server test request did not complete.';
     }
 
+    const testBody = (await testResponse.json()) as {
+      delivery?: {
+        configured?: boolean;
+        attempted?: number;
+        sent?: number;
+        failed?: number;
+      };
+    };
+
     await refreshPushStatus();
+    if (!testBody.delivery?.configured) {
+      return 'Push is enabled locally, but VAPID server keys are missing in this deployment.';
+    }
+
+    if (!testBody.delivery.attempted) {
+      return 'Push is enabled locally, but no server subscription was found for this account.';
+    }
+
+    if (!testBody.delivery.sent) {
+      return 'Push is enabled locally, but the browser push service rejected the server test.';
+    }
+
+    return `Push is enabled on this device. Server test sent to ${testBody.delivery.sent} subscription(s).`;
   }, [refreshPushStatus]);
 
   const checkIn = useCallback(async () => {

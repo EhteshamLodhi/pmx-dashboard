@@ -57,8 +57,7 @@ export function NotificationCenter() {
   const handleEnablePush = async () => {
     setPushMessage(null);
     try {
-      await enablePushNotifications();
-      setPushMessage('Push is enabled on this device.');
+      setPushMessage(await enablePushNotifications());
     } catch (error) {
       setPushMessage(error instanceof Error ? error.message : 'Unable to enable push notifications.');
     }

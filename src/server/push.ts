@@ -16,6 +16,20 @@ type StoredSubscription = {
   subscription: unknown;
 };
 
+type PushDeliveryResult = {
+  configured: boolean;
+  attempted: number;
+  sent: number;
+  failed: number;
+  stale: number;
+  failures: Array<{
+    subscriptionId: string;
+    userId: string;
+    statusCode?: number;
+    message: string;
+  }>;
+};
+
 function notificationVibration(category: NotificationCategory) {
   if (category === 'approval') return [300, 120, 300, 120, 600];
   if (category === 'attendance') return [250, 100, 250, 100, 250];
@@ -39,7 +53,16 @@ function hasPushConfiguration() {
 }
 
 export async function sendPushNotifications(admin: SupabaseClient, inputs: PushInput[]) {
-  if (!hasPushConfiguration() || inputs.length === 0) return;
+  const result: PushDeliveryResult = {
+    configured: hasPushConfiguration(),
+    attempted: 0,
+    sent: 0,
+    failed: 0,
+    stale: 0,
+    failures: [],
+  };
+
+  if (!result.configured || inputs.length === 0) return result;
 
   const webpush = await loadWebPush();
   webpush.setVapidDetails(
@@ -54,7 +77,17 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
     .select('id, user_id, subscription')
     .in('user_id', userIds);
 
-  if (error || !data?.length) return;
+  if (error) {
+    result.failed = inputs.length;
+    result.failures.push({
+      subscriptionId: 'supabase-query',
+      userId: userIds.join(','),
+      message: error.message,
+    });
+    return result;
+  }
+
+  if (!data?.length) return result;
 
   const subscriptionsByUser = new Map<string, StoredSubscription[]>();
   for (const item of data as StoredSubscription[]) {
@@ -68,6 +101,7 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
   await Promise.all(
     inputs.flatMap((input) =>
       (subscriptionsByUser.get(input.userId) ?? []).map(async (subscription) => {
+        result.attempted += 1;
         try {
           await webpush.sendNotification(
             subscription.subscription,
@@ -80,16 +114,27 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
               vibrate: notificationVibration(input.category),
             }),
           );
+          result.sent += 1;
         } catch (error) {
           const statusCode =
             typeof error === 'object' && error && 'statusCode' in error
               ? Number((error as { statusCode?: number }).statusCode)
               : undefined;
+          const message = error instanceof Error ? error.message : 'Unknown push delivery error';
 
           if (statusCode === 404 || statusCode === 410) {
             staleSubscriptionIds.push(subscription.id);
+            result.stale += 1;
             return;
           }
+
+          result.failed += 1;
+          result.failures.push({
+            subscriptionId: subscription.id,
+            userId: input.userId,
+            statusCode,
+            message,
+          });
 
           console.error('Push delivery failed', {
             subscriptionId: subscription.id,
@@ -105,4 +150,6 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
   if (staleSubscriptionIds.length > 0) {
     await admin.from('push_subscriptions').delete().in('id', staleSubscriptionIds);
   }
+
+  return result;
 }
