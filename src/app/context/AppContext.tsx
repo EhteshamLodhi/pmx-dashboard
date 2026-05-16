@@ -83,6 +83,13 @@ function urlBase64ToUint8Array(value: string) {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
+function uint8ArrayToUrlBase64(value: ArrayBuffer | null) {
+  if (!value) return null;
+  const bytes = new Uint8Array(value);
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
 function upsertById<T extends { id: string }>(items: T[], item: T) {
   const exists = items.some((candidate) => candidate.id === item.id);
   return exists ? items.map((candidate) => (candidate.id === item.id ? item : candidate)) : [item, ...items];
@@ -284,7 +291,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const registration = await navigator.serviceWorker.ready;
     const existingSubscription = await registration.pushManager.getSubscription();
-    setPushNotificationsEnabled(Boolean(existingSubscription));
+    const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    const existingKey = uint8ArrayToUrlBase64(existingSubscription?.options.applicationServerKey ?? null);
+    setPushNotificationsEnabled(Boolean(existingSubscription) && Boolean(publicKey) && existingKey === publicKey);
   }, [pushNotificationsSupported]);
 
   const showLocalSystemNotification = useCallback(
@@ -487,20 +496,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     const registration = await navigator.serviceWorker.ready;
-    const existingSubscription = await registration.pushManager.getSubscription();
     const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!publicKey) {
+      throw new Error('Add NEXT_PUBLIC_VAPID_PUBLIC_KEY to enable browser push subscriptions.');
+    }
 
+    const existingSubscription = await registration.pushManager.getSubscription();
+    const existingKey = uint8ArrayToUrlBase64(existingSubscription?.options.applicationServerKey ?? null);
+
+    if (existingSubscription && existingKey !== publicKey) {
+      try {
+        await existingSubscription.unsubscribe();
+      } catch (error) {
+        console.warn('Unable to remove outdated push subscription', error);
+      }
+    }
+
+    const currentSubscription = await registration.pushManager.getSubscription();
     const subscription =
-      existingSubscription ??
-      (publicKey
-        ? await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(publicKey),
-          })
-        : null);
+      currentSubscription ??
+      await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
 
     if (!subscription) {
-      throw new Error('Add NEXT_PUBLIC_VAPID_PUBLIC_KEY to enable browser push subscriptions.');
+      throw new Error('Unable to create a browser push subscription for this device.');
     }
 
     const response = await fetch('/api/push-subscriptions', {
