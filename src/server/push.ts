@@ -52,8 +52,24 @@ function hasPushConfiguration() {
   return Boolean(
     process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY &&
       process.env.VAPID_PRIVATE_KEY &&
-      process.env.VAPID_SUBJECT,
+      getVapidSubject(),
   );
+}
+
+function getVapidSubject() {
+  const subject = process.env.VAPID_SUBJECT?.trim();
+  if (!subject) return null;
+
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(subject)) {
+    return `mailto:${subject}`;
+  }
+
+  try {
+    const url = new URL(subject);
+    return url.protocol === 'mailto:' || url.protocol === 'https:' ? subject : null;
+  } catch {
+    return null;
+  }
 }
 
 function asStoredSubscriptionPayload(subscription: StoredSubscription) {
@@ -88,11 +104,22 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
   if (inputs.length === 0) return result;
 
   const webpush = await loadWebPush();
-  webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT as string,
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string,
-    process.env.VAPID_PRIVATE_KEY as string,
-  );
+  const vapidSubject = getVapidSubject();
+  if (!vapidSubject) {
+    console.warn('Web Push is not configured. VAPID_SUBJECT must be a mailto: or https: URL.');
+    return { ...result, configured: false };
+  }
+
+  try {
+    webpush.setVapidDetails(
+      vapidSubject,
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string,
+      process.env.VAPID_PRIVATE_KEY as string,
+    );
+  } catch (error) {
+    console.error('Web Push VAPID configuration is invalid.', error);
+    return { ...result, configured: false };
+  }
 
   const userIds = [...new Set(inputs.map((input) => input.userId))];
   const { data, error } = await admin
