@@ -8,12 +8,16 @@ type PushInput = {
   message: string;
   link?: string;
   tag?: string;
+  notificationId?: string;
 };
 
 type StoredSubscription = {
   id: string;
   user_id: string;
-  subscription: unknown;
+  endpoint?: string | null;
+  p256dh?: string | null;
+  auth?: string | null;
+  subscription?: unknown;
 };
 
 type PushDeliveryResult = {
@@ -52,6 +56,20 @@ function hasPushConfiguration() {
   );
 }
 
+function asStoredSubscriptionPayload(subscription: StoredSubscription) {
+  if (subscription.endpoint && subscription.p256dh && subscription.auth) {
+    return {
+      endpoint: subscription.endpoint,
+      keys: {
+        p256dh: subscription.p256dh,
+        auth: subscription.auth,
+      },
+    };
+  }
+
+  return subscription.subscription;
+}
+
 export async function sendPushNotifications(admin: SupabaseClient, inputs: PushInput[]) {
   const result: PushDeliveryResult = {
     configured: hasPushConfiguration(),
@@ -62,7 +80,12 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
     failures: [],
   };
 
-  if (!result.configured || inputs.length === 0) return result;
+  if (!result.configured) {
+    console.warn('Web Push is not configured. Missing VAPID environment variables.');
+    return result;
+  }
+
+  if (inputs.length === 0) return result;
 
   const webpush = await loadWebPush();
   webpush.setVapidDetails(
@@ -74,7 +97,7 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
   const userIds = [...new Set(inputs.map((input) => input.userId))];
   const { data, error } = await admin
     .from('push_subscriptions')
-    .select('id, user_id, subscription')
+    .select('id, user_id, endpoint, p256dh, auth, subscription')
     .in('user_id', userIds);
 
   if (error) {
@@ -89,6 +112,11 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
 
   if (!data?.length) return result;
 
+  console.info('Push attempt started', {
+    receiverCount: userIds.length,
+    subscriptionCount: data.length,
+  });
+
   const subscriptionsByUser = new Map<string, StoredSubscription[]>();
   for (const item of data as StoredSubscription[]) {
     const list = subscriptionsByUser.get(item.user_id) ?? [];
@@ -101,20 +129,31 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
   await Promise.all(
     inputs.flatMap((input) =>
       (subscriptionsByUser.get(input.userId) ?? []).map(async (subscription) => {
+        const subscriptionPayload = asStoredSubscriptionPayload(subscription);
+        if (!subscriptionPayload) return;
+
         result.attempted += 1;
         try {
           await webpush.sendNotification(
-            subscription.subscription,
+            subscriptionPayload,
             JSON.stringify({
               title: input.title,
+              body: input.message,
               message: input.message,
               category: input.category,
+              type: input.category,
+              url: input.link ?? '/dashboard',
               link: input.link ?? '/dashboard',
+              notificationId: input.notificationId,
               tag: input.tag ?? `${input.category}:${input.userId}`,
               vibrate: notificationVibration(input.category),
             }),
           );
           result.sent += 1;
+          console.info('Push sent successfully', {
+            subscriptionId: subscription.id,
+            userId: input.userId,
+          });
         } catch (error) {
           const statusCode =
             typeof error === 'object' && error && 'statusCode' in error
@@ -125,6 +164,10 @@ export async function sendPushNotifications(admin: SupabaseClient, inputs: PushI
           if (statusCode === 404 || statusCode === 410) {
             staleSubscriptionIds.push(subscription.id);
             result.stale += 1;
+            console.info('Removed stale push subscription', {
+              subscriptionId: subscription.id,
+              statusCode,
+            });
             return;
           }
 

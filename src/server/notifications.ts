@@ -11,6 +11,28 @@ type NotificationInput = {
   sourceKey?: string;
 };
 
+type NotificationRow = {
+  id: string;
+  user_id: string;
+  category: NotificationCategory;
+  title: string;
+  message: string;
+  link?: string | null;
+  source_key?: string | null;
+};
+
+function toPushInput(row: NotificationRow) {
+  return {
+    userId: row.user_id,
+    category: row.category,
+    title: row.title,
+    message: row.message,
+    link: row.link ?? undefined,
+    notificationId: row.id,
+    tag: row.id,
+  };
+}
+
 export async function createNotification(admin: SupabaseClient, input: NotificationInput) {
   const payload = {
     user_id: input.userId,
@@ -21,22 +43,29 @@ export async function createNotification(admin: SupabaseClient, input: Notificat
     source_key: input.sourceKey ?? null,
   };
 
-  const { error } = input.sourceKey
-    ? await admin.from('notifications').upsert(payload, { onConflict: 'source_key', ignoreDuplicates: true })
-    : await admin.from('notifications').insert(payload);
+  const { data, error } = input.sourceKey
+    ? await admin
+        .from('notifications')
+        .upsert(payload, { onConflict: 'source_key', ignoreDuplicates: true })
+        .select('id, user_id, category, title, message, link, source_key')
+        .maybeSingle()
+    : await admin
+        .from('notifications')
+        .insert(payload)
+        .select('id, user_id, category, title, message, link, source_key')
+        .single();
 
   if (error) throw error;
+  if (!data) return null;
 
-  await sendPushNotifications(admin, [
-    {
-      userId: input.userId,
-      category: input.category,
-      title: input.title,
-      message: input.message,
-      link: input.link,
-      tag: input.sourceKey ?? `${input.category}:${input.userId}`,
-    },
-  ]);
+  console.info('Notification inserted', {
+    notificationId: data.id,
+    userId: data.user_id,
+    category: data.category,
+  });
+
+  await sendPushNotifications(admin, [toPushInput(data as NotificationRow)]);
+  return data;
 }
 
 export async function createNotifications(admin: SupabaseClient, inputs: NotificationInput[]) {
@@ -52,23 +81,24 @@ export async function createNotifications(admin: SupabaseClient, inputs: Notific
   }));
 
   const hasSourceKeys = payload.every((notification) => notification.source_key);
-  const { error } = hasSourceKeys
-    ? await admin.from('notifications').upsert(payload, { onConflict: 'source_key', ignoreDuplicates: true })
-    : await admin.from('notifications').insert(payload);
+  const { data, error } = hasSourceKeys
+    ? await admin
+        .from('notifications')
+        .upsert(payload, { onConflict: 'source_key', ignoreDuplicates: true })
+        .select('id, user_id, category, title, message, link, source_key')
+    : await admin
+        .from('notifications')
+        .insert(payload)
+        .select('id, user_id, category, title, message, link, source_key');
 
   if (error) throw error;
+  if (!data?.length) return;
 
-  await sendPushNotifications(
-    admin,
-    inputs.map((input) => ({
-      userId: input.userId,
-      category: input.category,
-      title: input.title,
-      message: input.message,
-      link: input.link,
-      tag: input.sourceKey ?? `${input.category}:${input.userId}`,
-    })),
-  );
+  console.info('Notifications inserted', {
+    count: data.length,
+  });
+
+  await sendPushNotifications(admin, (data as NotificationRow[]).map(toPushInput));
 }
 
 export async function createRoleNotification(

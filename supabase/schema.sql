@@ -147,11 +147,28 @@ create table if not exists public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
   endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
   subscription jsonb not null,
   user_agent text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.push_subscriptions add column if not exists p256dh text;
+alter table public.push_subscriptions add column if not exists auth text;
+
+update public.push_subscriptions
+set
+  p256dh = coalesce(p256dh, subscription -> 'keys' ->> 'p256dh'),
+  auth = coalesce(auth, subscription -> 'keys' ->> 'auth')
+where p256dh is null or auth is null;
+
+delete from public.push_subscriptions
+where endpoint is null or p256dh is null or auth is null;
+
+alter table public.push_subscriptions alter column p256dh set not null;
+alter table public.push_subscriptions alter column auth set not null;
 
 create table if not exists public.attendance_settings (
   id uuid primary key default gen_random_uuid(),
@@ -198,6 +215,7 @@ create index if not exists users_role_idx on public.users(role);
 create index if not exists notifications_user_read_idx on public.notifications(user_id, is_read, created_at desc);
 create index if not exists notifications_source_key_idx on public.notifications(source_key);
 create index if not exists push_subscriptions_user_idx on public.push_subscriptions(user_id);
+create unique index if not exists push_subscriptions_endpoint_unique_idx on public.push_subscriptions(endpoint);
 
 create or replace function public.handle_updated_at()
 returns trigger

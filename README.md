@@ -48,7 +48,7 @@ Open [http://localhost:3001](http://localhost:3001).
 
 ## PWA and Notifications
 
-The portal includes installable PWA support, an offline shell, an install prompt, a service worker, in-app notifications, Supabase Realtime notification updates, browser push subscription storage, and reminder cron endpoints.
+The portal includes installable PWA support, an offline shell, an install prompt, a service worker, in-app notifications, Supabase Realtime notification updates, server-side browser push delivery, browser push subscription storage, and reminder cron endpoints.
 
 Additional environment variables:
 
@@ -63,9 +63,11 @@ APP_TIMEZONE_OFFSET_MINUTES=300
 Run the latest `supabase/schema.sql` after pulling updates. It adds:
 
 - `notifications`
-- `push_subscriptions`
+- `push_subscriptions` with `endpoint`, `p256dh`, and `auth` fields for Web Push delivery
 - `attendance_settings`
 - notification and push RLS policies
+
+Browser subscriptions are saved through the authenticated `POST /api/push/subscribe` route. App notifications created through the server notification helpers are inserted into Supabase and then sent to the receiver's saved browser subscriptions with VAPID Web Push, so delivery does not depend on the receiver having an active app tab open.
 
 On Vercel Hobby, high-frequency cron schedules are not allowed, so `vercel.json` does not register the reminder endpoint automatically. Keep `CRON_SECRET` in Vercel and trigger `/api/notifications/reminders` from an external scheduler if you want reminder automation on Hobby. Upgrading to Vercel Pro lets you restore a frequent built-in cron schedule.
 

@@ -524,7 +524,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       throw new Error('Unable to create a browser push subscription for this device.');
     }
 
-    const response = await fetch('/api/push-subscriptions', {
+    const response = await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

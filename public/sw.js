@@ -16,7 +16,10 @@ function readPushPayload(event) {
     return {
       title: 'PowerMatix',
       message: 'You have a new notification.',
+      body: 'You have a new notification.',
       category: 'admin',
+      type: 'admin',
+      url: '/dashboard',
       link: '/dashboard',
     };
   }
@@ -36,7 +39,10 @@ function readPushPayload(event) {
       return {
         title: 'PowerMatix',
         message: textPayload,
+        body: textPayload,
         category: 'admin',
+        type: 'admin',
+        url: '/dashboard',
         link: '/dashboard',
       };
     }
@@ -47,7 +53,10 @@ function readPushPayload(event) {
   return {
     title: 'PowerMatix',
     message: 'You have a new notification.',
+    body: 'You have a new notification.',
     category: 'admin',
+    type: 'admin',
+    url: '/dashboard',
     link: '/dashboard',
   };
 }
@@ -106,13 +115,16 @@ self.addEventListener('push', (event) => {
       body: payload.message || payload.body || 'You have a new notification.',
       icon: '/icon-192.png',
       badge: '/badge-72.png',
-      requireInteraction: payload.category === 'approval' || payload.category === 'attendance',
+      requireInteraction: payload.category === 'approval' || payload.category === 'attendance' || payload.type === 'approval' || payload.type === 'attendance',
       renotify: true,
-      tag: payload.tag || payload.category || 'powermatix-notification',
+      tag: payload.tag || payload.notificationId || payload.category || payload.type || 'powermatix-notification',
       timestamp: Date.now(),
-      vibrate: payload.vibrate || notificationVibration(payload.category),
+      vibrate: payload.vibrate || notificationVibration(payload.category || payload.type),
       data: {
-        link: payload.link || '/dashboard',
+        url: payload.url || payload.link || '/dashboard',
+        link: payload.url || payload.link || '/dashboard',
+        notificationId: payload.notificationId,
+        type: payload.type || payload.category,
       },
     }),
   );
@@ -120,16 +132,17 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const link = event.notification.data?.link || '/dashboard';
+  const link = event.notification.data?.url || event.notification.data?.link || '/dashboard';
+  const targetUrl = new URL(link, self.location.origin).href;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       const existingClient = clients.find((client) => client.url.includes(self.location.origin));
       if (existingClient) {
         existingClient.focus();
-        return existingClient.navigate(link);
+        return existingClient.navigate(targetUrl);
       }
-      return self.clients.openWindow(link);
+      return self.clients.openWindow(targetUrl);
     }),
   );
 });
