@@ -16,10 +16,12 @@ import {
   Users,
   Zap,
   Download,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LeaveRequest } from '../types';
 import { formatDisplayTime } from '@/lib/time';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 const TODAY = new Date().toISOString().split('T')[0];
 const TODAY_LABEL = new Date().toLocaleDateString('en-US', {
@@ -255,6 +257,7 @@ function AdminDailyBoard() {
 // ─── Employee Dashboard ─────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { currentUser, getTodayRecord, leaveRequests, attendanceRecords, checkIn, checkOut } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const router = useRouter();
   const todayRecord = getTodayRecord();
 
@@ -286,27 +289,37 @@ export default function Dashboard() {
 
   const handleCheckIn = async () => {
     if (!canCheckIn) return;
-    try {
+    await runAction('dashboard-check-in', async () => {
       setActionError(null);
       await checkIn();
       setCheckInFeedback(true);
       setTimeout(() => setCheckInFeedback(false), 2500);
-    } catch (error) {
+    }, {
+      loading: 'Recording check-in...',
+      success: 'Checked in successfully.',
+      error: 'Unable to check in right now.',
+    }).catch((error) => {
       setActionError(error instanceof Error ? error.message : 'Unable to check in right now.');
-    }
+    });
   };
 
   const handleCheckOut = async () => {
     if (!canCheckOut) return;
-    try {
+    await runAction('dashboard-check-out', async () => {
       setActionError(null);
       await checkOut();
       setCheckOutFeedback(true);
       setTimeout(() => setCheckOutFeedback(false), 2500);
-    } catch (error) {
+    }, {
+      loading: 'Recording check-out...',
+      success: 'Checked out successfully.',
+      error: 'Unable to check out right now.',
+    }).catch((error) => {
       setActionError(error instanceof Error ? error.message : 'Unable to check out right now.');
-    }
+    });
   };
+  const checkingIn = isPending('dashboard-check-in');
+  const checkingOut = isPending('dashboard-check-out');
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
@@ -356,9 +369,9 @@ export default function Dashboard() {
               )}
               <button
                 onClick={() => void handleCheckIn()}
-                disabled={!canCheckIn}
+                disabled={!canCheckIn || checkingIn}
                 className={`relative w-36 h-36 md:w-40 md:h-40 rounded-full flex flex-col items-center justify-center gap-1.5 shadow-xl transition-all duration-200
-                  ${canCheckIn
+                  ${canCheckIn && !checkingIn
                     ? 'bg-gradient-to-br from-green-400 to-green-700 hover:scale-105 active:scale-95 hover:shadow-green-300/50 hover:shadow-2xl cursor-pointer'
                     : todayRecord?.checkIn
                     ? 'bg-gradient-to-br from-green-500 to-green-700 cursor-default opacity-90'
@@ -368,7 +381,13 @@ export default function Dashboard() {
                 {/* Inner ring */}
                 <div className={`absolute inset-2 rounded-full border-2 ${canCheckIn || todayRecord?.checkIn ? 'border-white/20' : 'border-gray-300/30'}`} />
 
-                {todayRecord?.checkIn ? (
+                {checkingIn ? (
+                  <>
+                    <Loader2 className="w-8 h-8 text-white drop-shadow animate-spin" />
+                    <span className="text-white" style={{ fontSize: '15px', fontWeight: 700 }}>Checking In</span>
+                    <span className="text-white/70" style={{ fontSize: '11px' }}>One moment</span>
+                  </>
+                ) : todayRecord?.checkIn ? (
                   <>
                     <CheckCircle2 className="w-8 h-8 text-white drop-shadow" />
                     <span className="text-white tabular-nums" style={{ fontSize: '18px', fontWeight: 700, lineHeight: 1 }}>
@@ -409,9 +428,9 @@ export default function Dashboard() {
               )}
               <button
                 onClick={() => void handleCheckOut()}
-                disabled={!canCheckOut}
+                disabled={!canCheckOut || checkingOut}
                 className={`relative w-36 h-36 md:w-40 md:h-40 rounded-full flex flex-col items-center justify-center gap-1.5 shadow-xl transition-all duration-200
-                  ${canCheckOut
+                  ${canCheckOut && !checkingOut
                     ? 'bg-gradient-to-br from-blue-400 to-blue-700 hover:scale-105 active:scale-95 hover:shadow-blue-300/50 hover:shadow-2xl cursor-pointer'
                     : todayRecord?.checkOut
                     ? 'bg-gradient-to-br from-blue-500 to-blue-700 cursor-default opacity-90'
@@ -420,7 +439,13 @@ export default function Dashboard() {
               >
                 <div className={`absolute inset-2 rounded-full border-2 ${canCheckOut || todayRecord?.checkOut ? 'border-white/20' : 'border-gray-300/30'}`} />
 
-                {todayRecord?.checkOut ? (
+                {checkingOut ? (
+                  <>
+                    <Loader2 className="w-8 h-8 text-white drop-shadow animate-spin" />
+                    <span className="text-white" style={{ fontSize: '15px', fontWeight: 700 }}>Checking Out</span>
+                    <span className="text-white/70" style={{ fontSize: '11px' }}>One moment</span>
+                  </>
+                ) : todayRecord?.checkOut ? (
                   <>
                     <CheckCircle2 className="w-8 h-8 text-white drop-shadow" />
                     <span className="text-white tabular-nums" style={{ fontSize: '18px', fontWeight: 700, lineHeight: 1 }}>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, Zap } from 'lucide-react';
+import { Loader2, Shield, Zap } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 function MicrosoftLogo() {
@@ -20,6 +20,7 @@ export default function SignIn({ initialError }: { initialError?: string | null 
   const { isLoggedIn } = useApp();
   const router = useRouter();
   const [error, setError] = useState<string | null>(initialError ?? null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
   useEffect(() => {
     if (isLoggedIn) router.push('/dashboard');
@@ -62,12 +63,22 @@ export default function SignIn({ initialError }: { initialError?: string | null 
 
           <a
             href="/api/auth/sign-in"
-            onClick={() => setError(null)}
-            className="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 transition-all shadow-sm hover:shadow"
+            aria-disabled={isSigningIn}
+            onClick={(event) => {
+              if (isSigningIn) {
+                event.preventDefault();
+                return;
+              }
+              setError(null);
+              setIsSigningIn(true);
+            }}
+            className={`w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 transition-all shadow-sm hover:shadow ${
+              isSigningIn ? 'pointer-events-none opacity-70' : ''
+            }`}
           >
-            <MicrosoftLogo />
+            {isSigningIn ? <Loader2 className="w-5 h-5 animate-spin text-green-600" /> : <MicrosoftLogo />}
             <span className="text-gray-700" style={{ fontSize: '14px', fontWeight: 500 }}>
-              Sign in with Microsoft
+              {isSigningIn ? 'Opening Microsoft...' : 'Sign in with Microsoft'}
             </span>
           </a>
 

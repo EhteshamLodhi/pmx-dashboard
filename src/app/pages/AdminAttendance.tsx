@@ -1,10 +1,11 @@
 'use client';
 
 import { useDeferredValue, useMemo, useState } from 'react';
-import { AlertTriangle, Calendar, CheckCircle2, Clock, Edit3, Search, Shield, Users } from 'lucide-react';
+import { AlertTriangle, Calendar, CheckCircle2, Clock, Edit3, Loader2, Search, Shield, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { AttendanceRecord, AttendanceStatus, User } from '../types';
 import { formatDisplayTime } from '@/lib/time';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -30,6 +31,7 @@ function formatHours(record?: AttendanceRecord) {
 
 export default function AdminAttendance() {
   const { users, attendanceRecords, updateAttendanceRecord, addAttendanceRecord, currentUser } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [project, setProject] = useState('all');
   const [search, setSearch] = useState('');
@@ -85,7 +87,7 @@ export default function AdminAttendance() {
       notes: editForm.notes || undefined,
     };
 
-    try {
+    await runAction(`admin-attendance:${editing.user.id}:${selectedDate}`, async () => {
       setEditError(null);
       if (editing.record) {
         await updateAttendanceRecord(editing.record.id, payload);
@@ -93,10 +95,15 @@ export default function AdminAttendance() {
         await addAttendanceRecord(payload);
       }
       setEditing(null);
-    } catch (error) {
+    }, {
+      loading: 'Saving attendance update...',
+      success: 'Attendance entry saved.',
+      error: 'Unable to save this attendance update.',
+    }).catch((error) => {
       setEditError(error instanceof Error ? error.message : 'Unable to save this attendance update.');
-    }
+    });
   };
+  const savingEdit = editing ? isPending(`admin-attendance:${editing.user.id}:${selectedDate}`) : false;
 
   if (currentUser?.role !== 'admin') {
     return (
@@ -273,8 +280,25 @@ export default function AdminAttendance() {
                 </div>
               )}
               <div className="flex gap-3">
-                <button onClick={() => setEditing(null)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50">Cancel</button>
-                <button onClick={() => void saveEdit()} className="flex-1 py-2.5 rounded-xl bg-green-600 text-white hover:bg-green-700 font-semibold">Save Changes</button>
+                <button
+                  onClick={() => setEditing(null)}
+                  disabled={savingEdit}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => void saveEdit()}
+                  disabled={savingEdit}
+                  className="flex-1 py-2.5 rounded-xl bg-green-600 text-white hover:bg-green-700 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {savingEdit ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </span>
+                  ) : 'Save Changes'}
+                </button>
               </div>
             </div>
           </div>

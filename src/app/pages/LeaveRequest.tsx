@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CalendarDays, PlusCircle, Clock, CheckCircle2, XCircle, ChevronRight, Info, Edit3, Save } from 'lucide-react';
+import { CalendarDays, PlusCircle, Clock, CheckCircle2, XCircle, ChevronRight, Info, Edit3, Save, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LeaveType, LeaveRequest, PolicySettings } from '../types';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -36,6 +37,7 @@ function getStatusBadge(status: LeaveRequest['status']) {
 
 export default function LeaveRequestPage() {
   const { currentUser, leaveRequests, submitLeaveRequest } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     type: 'annual' as LeaveType,
@@ -108,7 +110,7 @@ export default function LeaveRequestPage() {
       return;
     }
 
-    try {
+    await runAction('leave-submit', async () => {
       setSubmitError(null);
       await submitLeaveRequest(form);
       setSubmitted(true);
@@ -118,9 +120,13 @@ export default function LeaveRequestPage() {
         setForm({ type: 'annual', startDate: '', endDate: '', reason: '' });
         setErrors({});
       }, 2500);
-    } catch (error) {
+    }, {
+      loading: 'Submitting leave request...',
+      success: 'Leave request submitted.',
+      error: 'Unable to submit your leave request.',
+    }).catch((error) => {
       setSubmitError(error instanceof Error ? error.message : 'Unable to submit your leave request.');
-    }
+    });
   };
 
   const approvedDays = myRequests.filter((request) => request.status === 'approved').reduce((sum, request) => sum + request.totalDays, 0);
@@ -131,7 +137,7 @@ export default function LeaveRequestPage() {
   const canEditPolicy = currentUser?.role === 'admin' || currentUser?.role === 'director';
 
   const savePolicy = async () => {
-    try {
+    await runAction('leave-policy-save', async () => {
       setSavingPolicy(true);
       setPolicyError(null);
       const response = await fetch('/api/admin/policies', {
@@ -147,12 +153,18 @@ export default function LeaveRequestPage() {
       }
 
       setEditingPolicy(false);
-    } catch (error) {
+    }, {
+      loading: 'Saving policy...',
+      success: 'Leave policy saved.',
+      error: 'Unable to save leave policy information.',
+    }).catch((error) => {
       setPolicyError(error instanceof Error ? error.message : 'Unable to save leave policy information.');
-    } finally {
+    }).finally(() => {
       setSavingPolicy(false);
-    }
+    });
   };
+  const submittingLeave = isPending('leave-submit');
+  const savingLeavePolicy = savingPolicy || isPending('leave-policy-save');
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto">
@@ -186,12 +198,12 @@ export default function LeaveRequestPage() {
           {canEditPolicy && (
             <button
               onClick={() => (editingPolicy ? void savePolicy() : setEditingPolicy(true))}
-              disabled={savingPolicy}
+              disabled={savingLeavePolicy}
               className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded-xl hover:bg-green-700 transition-all disabled:opacity-60"
               style={{ fontSize: '13px', fontWeight: 600 }}
             >
-              {editingPolicy ? <Save className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
-              {editingPolicy ? 'Save Policy' : 'Edit Policy'}
+              {savingLeavePolicy ? <Loader2 className="w-4 h-4 animate-spin" /> : editingPolicy ? <Save className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
+              {savingLeavePolicy ? 'Saving...' : editingPolicy ? 'Save Policy' : 'Edit Policy'}
             </button>
           )}
         </div>
@@ -406,6 +418,7 @@ export default function LeaveRequestPage() {
               <div className="flex gap-3 pt-1">
                 <button
                   onClick={() => { setShowForm(false); setErrors({}); }}
+                  disabled={submittingLeave}
                   className="flex-1 py-3 border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-50 transition-all"
                   style={{ fontSize: '14px', fontWeight: 500 }}
                 >
@@ -413,10 +426,16 @@ export default function LeaveRequestPage() {
                 </button>
                 <button
                   onClick={() => void handleSubmit()}
-                  className="flex-1 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all shadow-sm"
+                  disabled={submittingLeave}
+                  className="flex-1 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                   style={{ fontSize: '14px', fontWeight: 600 }}
                 >
-                  Submit Request
+                  {submittingLeave ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Submitting...
+                    </span>
+                  ) : 'Submit Request'}
                 </button>
               </div>
             </div>

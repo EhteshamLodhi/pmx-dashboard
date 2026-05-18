@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { LogIn, LogOut, Clock, CheckCircle2, Calendar, AlertTriangle, Info } from 'lucide-react';
+import { LogIn, LogOut, Clock, CheckCircle2, Calendar, AlertTriangle, Info, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { AttendanceRecord } from '../types';
 import { formatDisplayTime } from '@/lib/time';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 const TODAY = new Date().toISOString().split('T')[0];
 const TODAY_LABEL = new Date().toLocaleDateString('en-US', {
@@ -72,6 +73,7 @@ function LiveClock() {
 
 export default function Attendance() {
   const { currentUser, checkIn, checkOut, getTodayRecord, getAttendanceForUser } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const [justCheckedIn, setJustCheckedIn] = useState(false);
   const [justCheckedOut, setJustCheckedOut] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -96,29 +98,39 @@ export default function Attendance() {
   }
 
   const handleCheckIn = async () => {
-    try {
+    await runAction('attendance-check-in', async () => {
       setActionError(null);
       await checkIn();
       setJustCheckedIn(true);
       setTimeout(() => setJustCheckedIn(false), 3000);
-    } catch (error) {
+    }, {
+      loading: 'Recording check-in...',
+      success: 'Checked in successfully.',
+      error: 'Unable to check in right now.',
+    }).catch((error) => {
       setActionError(error instanceof Error ? error.message : 'Unable to check in right now.');
-    }
+    });
   };
 
   const handleCheckOut = async () => {
-    try {
+    await runAction('attendance-check-out', async () => {
       setActionError(null);
       await checkOut();
       setJustCheckedOut(true);
       setTimeout(() => setJustCheckedOut(false), 3000);
-    } catch (error) {
+    }, {
+      loading: 'Recording check-out...',
+      success: 'Checked out successfully.',
+      error: 'Unable to check out right now.',
+    }).catch((error) => {
       setActionError(error instanceof Error ? error.message : 'Unable to check out right now.');
-    }
+    });
   };
 
   const canCheckIn = !todayRecord?.checkIn;
   const canCheckOut = !!todayRecord?.checkIn && !todayRecord?.checkOut;
+  const checkingIn = isPending('attendance-check-in');
+  const checkingOut = isPending('attendance-check-out');
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto">
@@ -216,15 +228,20 @@ export default function Attendance() {
 
           <button
             onClick={() => void handleCheckIn()}
-            disabled={!canCheckIn}
+            disabled={!canCheckIn || checkingIn}
             className={`w-full py-3 rounded-xl transition-all ${
-              canCheckIn
+              canCheckIn && !checkingIn
                 ? 'bg-green-600 text-white hover:bg-green-700 shadow-sm hover:shadow-md active:scale-95'
                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
             }`}
             style={{ fontSize: '14px', fontWeight: 600 }}
           >
-            {todayRecord?.checkIn ? 'Already Checked In' : 'Check In Now'}
+            {checkingIn ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Checking In...
+              </span>
+            ) : todayRecord?.checkIn ? 'Already Checked In' : 'Check In Now'}
           </button>
         </div>
 
@@ -258,15 +275,20 @@ export default function Attendance() {
 
           <button
             onClick={() => void handleCheckOut()}
-            disabled={!canCheckOut}
+            disabled={!canCheckOut || checkingOut}
             className={`w-full py-3 rounded-xl transition-all ${
-              canCheckOut
+              canCheckOut && !checkingOut
                 ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-md active:scale-95'
                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
             }`}
             style={{ fontSize: '14px', fontWeight: 600 }}
           >
-            {todayRecord?.checkOut ? 'Already Checked Out' : 'Check Out Now'}
+            {checkingOut ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Checking Out...
+              </span>
+            ) : todayRecord?.checkOut ? 'Already Checked Out' : 'Check Out Now'}
           </button>
         </div>
       </div>

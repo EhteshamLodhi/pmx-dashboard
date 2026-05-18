@@ -1,9 +1,10 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Users, Search, Edit3, Check, X, ChevronDown, Shield, UserCheck, UserX, PlusCircle, SlidersHorizontal } from 'lucide-react';
+import { Users, Search, Edit3, Check, X, ChevronDown, Shield, UserCheck, UserX, PlusCircle, SlidersHorizontal, Loader2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { PolicySettings, User } from '../types';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 function getRoleBadge(role: User['role']) {
   switch (role) {
@@ -27,6 +28,7 @@ function UserRow({
   users: User[];
   onUpdate: (id: string, updates: Partial<User>) => Promise<void>;
 }) {
+  const { runAction } = useActionRunner();
   const [editing, setEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,16 +52,20 @@ function UserRow({
   const roleBadge = getRoleBadge(user.role);
 
   const handleSave = async () => {
-    try {
+    await runAction(`user-save:${user.id}`, async () => {
       setIsSaving(true);
       setError(null);
       await onUpdate(user.id, form);
       setEditing(false);
-    } catch (saveError) {
+    }, {
+      loading: 'Saving user settings...',
+      success: 'User settings saved.',
+      error: 'Unable to save user changes.',
+    }).catch((saveError) => {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save user changes.');
-    } finally {
+    }).finally(() => {
       setIsSaving(false);
-    }
+    });
   };
 
   return (
@@ -320,8 +326,8 @@ function UserRow({
               className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all disabled:opacity-60"
               style={{ fontSize: '13px', fontWeight: 600 }}
             >
-              <Check className="w-4 h-4" />
-              Save Changes
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              {isSaving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
 
@@ -337,6 +343,7 @@ function UserRow({
 }
 
 function PolicySettingsPanel() {
+  const { runAction } = useActionRunner();
   const [open, setOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -366,7 +373,7 @@ function PolicySettingsPanel() {
   }, [open]);
 
   const save = async () => {
-    try {
+    await runAction('admin-policy-save', async () => {
       setIsSaving(true);
       setMessage(null);
       const response = await fetch('/api/admin/policies', {
@@ -382,11 +389,15 @@ function PolicySettingsPanel() {
       }
 
       setMessage('Policy settings saved.');
-    } catch (error) {
+    }, {
+      loading: 'Saving policy settings...',
+      success: 'Policy settings saved.',
+      error: 'Unable to save policy settings.',
+    }).catch((error) => {
       setMessage(error instanceof Error ? error.message : 'Unable to save policy settings.');
-    } finally {
+    }).finally(() => {
       setIsSaving(false);
-    }
+    });
   };
 
   return (
@@ -484,7 +495,12 @@ function PolicySettingsPanel() {
             disabled={isSaving}
             className="mt-4 w-full py-2.5 rounded-xl bg-green-600 text-white hover:bg-green-700 font-semibold disabled:opacity-60"
           >
-            Save Policy Settings
+            {isSaving ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Saving...
+              </span>
+            ) : 'Save Policy Settings'}
           </button>
           {message && (
             <div className="mt-3 rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-700">
@@ -499,6 +515,7 @@ function PolicySettingsPanel() {
 
 export default function UserManagement() {
   const { users, updateUser, addUser } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [filterRole, setFilterRole] = useState('all');
@@ -550,7 +567,7 @@ export default function UserManagement() {
   const handleCreateUser = async () => {
     if (!newUser.name || !newUser.email || !newUser.project) return;
 
-    try {
+    await runAction('user-create', async () => {
       setError(null);
       await addUser(newUser);
       setShowAddUser(false);
@@ -571,10 +588,15 @@ export default function UserManagement() {
         projectManagerId: '',
         directorId: '',
       });
-    } catch (createError) {
+    }, {
+      loading: 'Creating user...',
+      success: 'User created.',
+      error: 'Unable to create user.',
+    }).catch((createError) => {
       setError(createError instanceof Error ? createError.message : 'Unable to create user.');
-    }
+    });
   };
+  const creatingUser = isPending('user-create');
 
   return (
     <div className="p-4 md:p-6 max-w-4xl mx-auto">
@@ -706,15 +728,22 @@ export default function UserManagement() {
             <div className="mt-4 flex gap-3">
               <button
                 onClick={() => setShowAddUser(false)}
+                disabled={creatingUser}
                 className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50"
               >
                 Cancel
               </button>
               <button
                 onClick={() => void handleCreateUser()}
-                className="flex-1 py-2.5 rounded-xl bg-green-600 text-white hover:bg-green-700 font-semibold"
+                disabled={creatingUser}
+                className="flex-1 py-2.5 rounded-xl bg-green-600 text-white hover:bg-green-700 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Create User
+                {creatingUser ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Creating...
+                  </span>
+                ) : 'Create User'}
               </button>
             </div>
 

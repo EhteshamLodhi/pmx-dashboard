@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Download, X } from 'lucide-react';
+import { Download, Loader2, X } from 'lucide-react';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -11,6 +11,7 @@ type BeforeInstallPromptEvent = Event & {
 export function PwaInstallPrompt() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [isInstalling, setIsInstalling] = useState(false);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -25,9 +26,15 @@ export function PwaInstallPrompt() {
   if (!installEvent || dismissed) return null;
 
   const install = async () => {
-    await installEvent.prompt();
-    await installEvent.userChoice;
-    setInstallEvent(null);
+    if (isInstalling) return;
+    try {
+      setIsInstalling(true);
+      await installEvent.prompt();
+      await installEvent.userChoice;
+      setInstallEvent(null);
+    } finally {
+      setIsInstalling(false);
+    }
   };
 
   return (
@@ -41,9 +48,15 @@ export function PwaInstallPrompt() {
           <p className="text-xs text-gray-500 mt-1">Add the portal to your device for quick access.</p>
           <button
             onClick={() => void install()}
-            className="mt-3 px-3 py-2 rounded-xl bg-green-600 text-white text-xs font-semibold hover:bg-green-700"
+            disabled={isInstalling}
+            className="mt-3 px-3 py-2 rounded-xl bg-green-600 text-white text-xs font-semibold hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Install App
+            {isInstalling ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Installing...
+              </span>
+            ) : 'Install App'}
           </button>
         </div>
         <button onClick={() => setDismissed(true)} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100">

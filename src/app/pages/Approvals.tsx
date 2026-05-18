@@ -11,9 +11,11 @@ import {
   CalendarDays,
   User,
   MessageSquare,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LeaveRequest } from '../types';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 function getLeaveTypeLabel(type: string) {
   switch (type) {
@@ -142,24 +144,30 @@ function RequestCard({
   approvalLevel,
   onApprove,
   onReject,
+  isProcessing,
 }: {
   request: LeaveRequest;
   canApprove: boolean;
   approvalLevel: 1 | 2;
-  onApprove: (id: string, level: 1 | 2, comment: string) => void;
-  onReject: (id: string, level: 1 | 2, comment: string) => void;
+  onApprove: (id: string, level: 1 | 2, comment: string) => Promise<void>;
+  onReject: (id: string, level: 1 | 2, comment: string) => Promise<void>;
+  isProcessing: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showActionForm, setShowActionForm] = useState(false);
   const [comment, setComment] = useState('');
   const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
 
-  const handleAction = () => {
+  const handleAction = async () => {
     if (!actionType) return;
-    if (actionType === 'approve') {
-      onApprove(request.id, approvalLevel, comment);
-    } else {
-      onReject(request.id, approvalLevel, comment);
+    try {
+      if (actionType === 'approve') {
+        await onApprove(request.id, approvalLevel, comment);
+      } else {
+        await onReject(request.id, approvalLevel, comment);
+      }
+    } catch {
+      return;
     }
     setShowActionForm(false);
     setComment('');
@@ -264,19 +272,26 @@ function RequestCard({
             <div className="flex gap-2 mt-2">
               <button
                 onClick={() => { setShowActionForm(false); setActionType(null); setComment(''); }}
+                disabled={isProcessing}
                 className="flex-1 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-white transition-all"
                 style={{ fontSize: '13px' }}
               >
                 Cancel
               </button>
               <button
-                onClick={handleAction}
+                onClick={() => void handleAction()}
+                disabled={isProcessing}
                 className={`flex-1 py-2 rounded-lg text-white transition-all ${
                   actionType === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-500 hover:bg-red-600'
-                }`}
+                } disabled:opacity-60 disabled:cursor-not-allowed`}
                 style={{ fontSize: '13px', fontWeight: 600 }}
               >
-                Confirm {actionType === 'approve' ? 'Approval' : 'Rejection'}
+                {isProcessing ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Saving...
+                  </span>
+                ) : `Confirm ${actionType === 'approve' ? 'Approval' : 'Rejection'}`}
               </button>
             </div>
           </div>
@@ -298,6 +313,7 @@ function RequestCard({
 
 export default function Approvals() {
   const { currentUser, leaveRequests, approveLeave } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const [activeTab, setActiveTab] = useState<'pending' | 'all'>('pending');
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -328,21 +344,31 @@ export default function Approvals() {
   };
 
   const handleApprove = async (id: string, level: 1 | 2, comment: string) => {
-    try {
+    await runAction(`approval:${id}`, async () => {
       setActionError(null);
       await approveLeave(id, level, true, comment);
-    } catch (error) {
+    }, {
+      loading: 'Approving leave request...',
+      success: 'Leave request approved.',
+      error: 'Unable to approve this request.',
+    }).catch((error) => {
       setActionError(error instanceof Error ? error.message : 'Unable to approve this request.');
-    }
+      throw error;
+    });
   };
 
   const handleReject = async (id: string, level: 1 | 2, comment: string) => {
-    try {
+    await runAction(`approval:${id}`, async () => {
       setActionError(null);
       await approveLeave(id, level, false, comment);
-    } catch (error) {
+    }, {
+      loading: 'Rejecting leave request...',
+      success: 'Leave request rejected.',
+      error: 'Unable to reject this request.',
+    }).catch((error) => {
       setActionError(error instanceof Error ? error.message : 'Unable to reject this request.');
-    }
+      throw error;
+    });
   };
 
   const isApprover = ['manager', 'director', 'admin'].includes(currentUser?.role ?? '');
@@ -439,6 +465,7 @@ export default function Approvals() {
                 approvalLevel={getApprovalLevel()}
                 onApprove={handleApprove}
                 onReject={handleReject}
+                isProcessing={isPending(`approval:${request.id}`)}
               />
             );
           })}

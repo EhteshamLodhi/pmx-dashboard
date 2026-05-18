@@ -2,6 +2,7 @@
 
 import { useState, useEffect, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
 import {
   LayoutDashboard,
   Clock,
@@ -16,9 +17,11 @@ import {
   X,
   ChevronRight,
   Shield,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { NotificationCenter } from './NotificationCenter';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 interface NavItem {
   path: string;
@@ -50,6 +53,7 @@ const BOTTOM_NAV: NavItem[] = [
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { isLoggedIn, isLoading, currentUser, logout, leaveRequests } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -97,8 +101,16 @@ export default function Layout({ children }: { children: ReactNode }) {
   const isActive = (path: string) => pathname === path || pathname.startsWith(path + '/');
 
   const handleLogout = () => {
-    void logout().then(() => router.push('/'));
+    void runAction('layout-logout', async () => {
+      await logout();
+      router.push('/');
+    }, {
+      loading: 'Signing out...',
+      success: 'Signed out.',
+      error: 'Unable to sign out.',
+    });
   };
+  const signingOut = isPending('layout-logout');
 
   const NavLink = ({ item }: { item: NavItem }) => {
     const active = isActive(item.path);
@@ -166,10 +178,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         <NavLink item={{ path: '/profile', label: 'Profile & Settings', icon: UserCircle }} />
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-red-500 hover:bg-red-50 transition-all text-left"
+          disabled={signingOut}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-red-500 hover:bg-red-50 transition-all text-left disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <LogOut className="w-5 h-5 flex-shrink-0" />
-          <span style={{ fontSize: '14px', fontWeight: 500 }}>Sign Out</span>
+          {signingOut ? <Loader2 className="w-5 h-5 flex-shrink-0 animate-spin" /> : <LogOut className="w-5 h-5 flex-shrink-0" />}
+          <span style={{ fontSize: '14px', fontWeight: 500 }}>{signingOut ? 'Signing Out...' : 'Sign Out'}</span>
         </button>
 
         {/* User info */}
@@ -245,9 +258,15 @@ export default function Layout({ children }: { children: ReactNode }) {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto pb-16 md:pb-0">
+        <motion.main
+          key={pathname}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="flex-1 overflow-y-auto pb-16 md:pb-0"
+        >
           {children}
-        </main>
+        </motion.main>
 
         {/* Mobile Bottom Nav */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex items-center z-40 shadow-lg">

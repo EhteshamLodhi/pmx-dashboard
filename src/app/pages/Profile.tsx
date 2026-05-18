@@ -15,8 +15,10 @@ import {
   Users,
   Clock,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 function getRoleLabel(role: string) {
   switch (role) {
@@ -33,6 +35,7 @@ function getRoleLabel(role: string) {
 
 export default function Profile() {
   const { currentUser, users, logout, updateUser, getAttendanceForUser, leaveRequests } = useApp();
+  const { isPending, runAction } = useActionRunner();
   const router = useRouter();
   const [editingPhone, setEditingPhone] = useState(false);
   const [phone, setPhone] = useState(currentUser?.phone ?? '');
@@ -54,21 +57,33 @@ export default function Profile() {
   const myLeaves = leaveRequests.filter((request) => request.userId === currentUser.id && request.status === 'approved').length;
 
   const handleLogout = () => {
-    void logout().then(() => router.push('/'));
+    void runAction('profile-logout', async () => {
+      await logout();
+      router.push('/');
+    }, {
+      loading: 'Signing out...',
+      success: 'Signed out.',
+      error: 'Unable to sign out.',
+    });
   };
 
   const handleSavePhone = async () => {
-    try {
+    await runAction('profile-phone-save', async () => {
       setIsSavingPhone(true);
       setSaveError(null);
       await updateUser(currentUser.id, { phone });
       setEditingPhone(false);
-    } catch (error) {
+    }, {
+      loading: 'Saving phone number...',
+      success: 'Phone number saved.',
+      error: 'Unable to save your phone number.',
+    }).catch((error) => {
       setSaveError(error instanceof Error ? error.message : 'Unable to save your phone number.');
-    } finally {
+    }).finally(() => {
       setIsSavingPhone(false);
-    }
+    });
   };
+  const signingOut = isPending('profile-logout');
 
   return (
     <div className="p-4 md:p-6 max-w-2xl mx-auto">
@@ -175,7 +190,7 @@ export default function Profile() {
                     disabled={isSavingPhone}
                     className="p-1.5 bg-green-600 text-white rounded-lg disabled:opacity-60"
                   >
-                    <Check className="w-3.5 h-3.5" />
+                    {isSavingPhone ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                   </button>
                 </div>
               ) : (
@@ -277,11 +292,12 @@ export default function Profile() {
 
       <button
         onClick={handleLogout}
-        className="w-full flex items-center justify-center gap-2 py-3.5 bg-red-50 border border-red-100 text-red-600 rounded-2xl hover:bg-red-100 transition-all"
+        disabled={signingOut}
+        className="w-full flex items-center justify-center gap-2 py-3.5 bg-red-50 border border-red-100 text-red-600 rounded-2xl hover:bg-red-100 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         style={{ fontSize: '14px', fontWeight: 600 }}
       >
-        <LogOut className="w-4 h-4" />
-        Sign Out
+        {signingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+        {signingOut ? 'Signing Out...' : 'Sign Out'}
       </button>
 
       <p className="text-center text-gray-400 mt-5" style={{ fontSize: '12px' }}>

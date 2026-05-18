@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Bell, CheckCheck, ExternalLink } from 'lucide-react';
+import { Bell, CheckCheck, ExternalLink, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../context/AppContext';
 import type { AppNotification } from '../types';
+import { useActionRunner } from '@/app/hooks/useActionRunner';
 
 function categoryLabel(notification: AppNotification) {
   switch (notification.category) {
@@ -30,6 +31,7 @@ function relativeTime(value: string) {
 
 export function NotificationCenter() {
   const router = useRouter();
+  const { isPending, runAction } = useActionRunner();
   const {
     notifications,
     unreadNotifications,
@@ -49,19 +51,27 @@ export function NotificationCenter() {
   }, [pushNotificationsEnabled]);
 
   const handleNotificationClick = async (notification: AppNotification) => {
-    if (!notification.isRead) await markNotificationRead(notification.id);
-    setOpen(false);
-    if (notification.link) router.push(notification.link);
+    await runAction(`notification:${notification.id}`, async () => {
+      if (!notification.isRead) await markNotificationRead(notification.id);
+      setOpen(false);
+      if (notification.link) router.push(notification.link);
+    });
   };
 
   const handleEnablePush = async () => {
     setPushMessage(null);
-    try {
+    await runAction('push-enable', async () => {
       setPushMessage(await enablePushNotifications());
-    } catch (error) {
+    }, {
+      loading: 'Enabling push notifications...',
+      success: 'Push notifications enabled.',
+      error: 'Unable to enable push notifications.',
+    }).catch((error) => {
       setPushMessage(error instanceof Error ? error.message : 'Unable to enable push notifications.');
-    }
+    });
   };
+  const enablingPush = isPending('push-enable');
+  const markingAllRead = isPending('notifications-read-all');
 
   return (
     <div className="relative">
@@ -87,11 +97,15 @@ export function NotificationCenter() {
               <p className="text-gray-400 text-xs">{unreadNotifications} unread</p>
             </div>
             <button
-              onClick={() => void markAllNotificationsRead()}
+              onClick={() => void runAction('notifications-read-all', markAllNotificationsRead, {
+                success: 'Notifications marked as read.',
+                error: 'Unable to mark notifications as read.',
+              })}
+              disabled={markingAllRead}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-green-700 hover:bg-green-50 text-xs font-semibold"
             >
-              <CheckCheck className="w-3.5 h-3.5" />
-              Read all
+              {markingAllRead ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
+              {markingAllRead ? 'Reading...' : 'Read all'}
             </button>
           </div>
 
@@ -132,10 +146,17 @@ export function NotificationCenter() {
           <div className="px-4 py-3 bg-gray-50 border-t border-gray-100">
             <button
               onClick={() => void handleEnablePush()}
-              disabled={!pushNotificationsSupported}
-              className="w-full py-2 rounded-xl bg-green-600 text-white hover:bg-green-700 text-sm font-semibold"
+              disabled={!pushNotificationsSupported || enablingPush}
+              className="w-full py-2 rounded-xl bg-green-600 text-white hover:bg-green-700 text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {!pushNotificationsSupported
+              {enablingPush
+                ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Enabling...
+                  </span>
+                )
+                : !pushNotificationsSupported
                 ? 'Push Not Supported Here'
                 : pushNotificationsEnabled
                   ? 'Push Enabled On This Device'

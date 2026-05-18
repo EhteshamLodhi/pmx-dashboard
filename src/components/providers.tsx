@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { AppProvider } from '@/app/context/AppContext';
+import { Toaster } from '@/app/components/ui/sonner';
 import { PwaInstallPrompt } from '@/components/pwa-install-prompt';
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -20,6 +21,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <AppProvider>
       {children}
       <PwaInstallPrompt />
+      <Toaster position="top-right" richColors closeButton />
     </AppProvider>
   );
 }
