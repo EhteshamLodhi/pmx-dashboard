@@ -38,10 +38,10 @@ export interface AttendanceRecord {
 }
 
 export type LeaveType = 'sick' | 'emergency' | 'casual' | 'annual';
-export type LeaveStatus = 'pending_manager' | 'pending_director' | 'approved' | 'rejected';
+export type LeaveStatus = 'pending_manager' | 'pending_project_manager' | 'pending_director' | 'approved' | 'rejected';
 
 export interface LeaveApproval {
-  level: 1 | 2;
+  level: 1 | 2 | 3;
   approverId: string;
   approverName: string;
   role: string;
@@ -81,6 +81,8 @@ export interface AppNotification {
 export interface PolicySettings {
   defaultReportingTime: string;
   checkInGraceMinutes: number;
+  globalReportingTime: string;
+  globalGracePeriod: number;
   checkOutReminderTime: string;
   sickLeaveDays: number;
   emergencyLeaveDays: number;

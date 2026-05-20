@@ -29,7 +29,7 @@ interface AppContextType {
     endDate: string;
     reason: string;
   }) => Promise<void>;
-  approveLeave: (leaveId: string, level: 1 | 2, approved: boolean, comment: string) => Promise<void>;
+  approveLeave: (leaveId: string, level: 1 | 2 | 3, approved: boolean, comment: string) => Promise<void>;
   updateAttendanceRecord: (id: string, updates: Partial<AttendanceRecord>) => Promise<void>;
   addAttendanceRecord: (record: Omit<AttendanceRecord, 'id'>) => Promise<void>;
   updateUserHierarchy: (userId: string, updates: { lineManagerId?: string; projectManagerId?: string; directorId?: string }) => Promise<void>;
@@ -678,6 +678,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const body = (await response.json()) as { data?: { id: string; submitted_at?: string } };
       if (body.data && currentUser) {
         const manager = users.find((user) => user.id === currentUser.lineManagerId);
+        const projectManager = users.find((user) => user.id === currentUser.projectManagerId);
         const director = users.find((user) => user.id === currentUser.directorId);
         const optimisticLeave: LeaveRequest = {
           id: body.data.id,
@@ -701,6 +702,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             },
             {
               level: 2,
+              approverId: currentUser.projectManagerId ?? '',
+              approverName: projectManager?.name ?? 'Project Manager',
+              role: 'Project Manager',
+              status: 'pending',
+            },
+            {
+              level: 3,
               approverId: currentUser.directorId ?? '',
               approverName: director?.name ?? 'Director',
               role: 'Director',
@@ -717,7 +725,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const approveLeave = useCallback(
-    async (leaveId: string, level: 1 | 2, approved: boolean, comment: string) => {
+    async (leaveId: string, level: 1 | 2 | 3, approved: boolean, comment: string) => {
       const response = await fetch('/api/leave-requests', {
         method: 'PATCH',
         headers: {
@@ -742,7 +750,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (request.id !== leaveId) return request;
           return {
             ...request,
-            status: approved ? (level === 1 ? 'pending_director' : 'approved') : 'rejected',
+            status: approved
+              ? level === 1
+                ? 'pending_project_manager'
+                : level === 2
+                  ? 'pending_director'
+                  : 'approved'
+              : 'rejected',
             approvals: request.approvals.map((approval) =>
               approval.level === level
                 ? {

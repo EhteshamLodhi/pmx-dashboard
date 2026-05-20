@@ -50,7 +50,7 @@ type DbAttendanceRow = {
 };
 
 type DbApprovalRow = {
-  approval_level: 1 | 2;
+  approval_level: 1 | 2 | 3;
   approver_id: string;
   approver_role: string;
   status: 'pending' | 'approved' | 'rejected';

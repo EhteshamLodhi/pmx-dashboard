@@ -1,11 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { LogIn, LogOut, Clock, CheckCircle2, Calendar, AlertTriangle, Info, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { LogIn, LogOut, Clock, CheckCircle2, Calendar, AlertTriangle, Info, Loader2, BarChart3 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { AttendanceRecord } from '../types';
+import { AttendanceRecord, PolicySettings } from '../types';
 import { formatDisplayTime } from '@/lib/time';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
+import {
+  averageTime,
+  filterRecordsByRange,
+  formatHours,
+  getComputedAttendanceStatus,
+  getDelayMinutes,
+  getWorkingHours,
+  type AttendanceRangeKey,
+} from '@/lib/attendance-analytics';
 
 const TODAY = new Date().toISOString().split('T')[0];
 const TODAY_LABEL = new Date().toLocaleDateString('en-US', {
@@ -77,12 +86,47 @@ export default function Attendance() {
   const [justCheckedIn, setJustCheckedIn] = useState(false);
   const [justCheckedOut, setJustCheckedOut] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [range, setRange] = useState<AttendanceRangeKey>('month');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [policy, setPolicy] = useState<PolicySettings | null>(null);
 
   const todayRecord = getTodayRecord();
-  const allRecords = [...getAttendanceForUser(currentUser?.id ?? '')].sort((a, b) =>
-    b.date.localeCompare(a.date),
+  const allRecords = useMemo(
+    () => [...getAttendanceForUser(currentUser?.id ?? '')].sort((a, b) => b.date.localeCompare(a.date)),
+    [currentUser?.id, getAttendanceForUser],
   );
-  const recentRecords = allRecords.slice(0, 7);
+  const filteredRecords = useMemo(
+    () => filterRecordsByRange(allRecords, range, customStart, customEnd),
+    [allRecords, customEnd, customStart, range],
+  );
+  const recentRecords = filteredRecords.slice(0, 10);
+
+  useEffect(() => {
+    fetch('/api/admin/policies', { credentials: 'include' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (body?.data) setPolicy(body.data);
+      })
+      .catch(() => setPolicy(null));
+  }, []);
+
+  const analytics = useMemo(() => {
+    const totalWorkingHours = filteredRecords.reduce((sum, record) => sum + getWorkingHours(record), 0);
+    const totalLateDays = filteredRecords.filter((record) => {
+      const status = getComputedAttendanceStatus(record, currentUser ?? undefined, policy);
+      return status === 'Late' || status === 'Very Late';
+    }).length;
+
+    return {
+      averageArrival: averageTime(filteredRecords.filter((record) => record.checkIn), 'checkIn'),
+      averageDeparture: averageTime(filteredRecords.filter((record) => record.checkOut), 'checkOut'),
+      totalWorkingHours,
+      totalPresentDays: filteredRecords.filter((record) => record.status === 'present' || record.status === 'late' || record.status === 'checked-in-only').length,
+      totalLateDays,
+      totalAbsentDays: filteredRecords.filter((record) => record.status === 'absent' || !record.checkIn).length,
+    };
+  }, [currentUser, filteredRecords, policy]);
 
   if (!currentUser) {
     return (
@@ -169,7 +213,7 @@ export default function Attendance() {
             <LiveClock />
           </p>
           <p className="text-green-200 mt-1" style={{ fontSize: '13px' }}>
-            {currentUser?.name} · {currentUser?.project ?? 'Unassigned'}
+            {currentUser?.name} - {currentUser?.project ?? 'Unassigned'}
           </p>
         </div>
 
@@ -306,25 +350,90 @@ export default function Attendance() {
         </div>
       </div>
 
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-6 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-green-600" />
+            <h2 className="text-gray-900" style={{ fontSize: '15px', fontWeight: 600 }}>
+              Attendance Insights
+            </h2>
+          </div>
+          <select
+            value={range}
+            onChange={(event) => setRange(event.target.value as AttendanceRangeKey)}
+            className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-gray-700 outline-none focus:ring-2 focus:ring-green-500"
+            style={{ fontSize: '12px', fontWeight: 600 }}
+          >
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+            <option value="quarter">This Quarter</option>
+            <option value="year">This Year</option>
+            <option value="custom">Custom Range</option>
+          </select>
+        </div>
+
+        {range === 'custom' && (
+          <div className="px-5 py-3 border-b border-gray-100 grid grid-cols-2 gap-3 bg-gray-50/60">
+            <input
+              type="date"
+              value={customStart}
+              onChange={(event) => setCustomStart(event.target.value)}
+              className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <input
+              type="date"
+              value={customEnd}
+              onChange={(event) => setCustomEnd(event.target.value)}
+              className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-5">
+          {[
+            { label: 'Average Arrival', value: formatDisplayTime(analytics.averageArrival), tone: 'text-green-700 bg-green-50' },
+            { label: 'Average Departure', value: formatDisplayTime(analytics.averageDeparture), tone: 'text-blue-700 bg-blue-50' },
+            { label: 'Working Hours', value: formatHours(analytics.totalWorkingHours), tone: 'text-gray-800 bg-gray-50' },
+            { label: 'Present Days', value: analytics.totalPresentDays, tone: 'text-green-700 bg-green-50' },
+            { label: 'Late Days', value: analytics.totalLateDays, tone: 'text-orange-700 bg-orange-50' },
+            { label: 'Absent Days', value: analytics.totalAbsentDays, tone: 'text-red-700 bg-red-50' },
+          ].map((item) => (
+            <div key={item.label} className={`rounded-xl p-4 ${item.tone}`}>
+              <p style={{ fontSize: '12px', fontWeight: 600 }}>{item.label}</p>
+              <p className="mt-1" style={{ fontSize: '20px', fontWeight: 700 }}>{item.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <Calendar className="w-4 h-4 text-gray-400" />
           <h2 className="text-gray-900" style={{ fontSize: '15px', fontWeight: 600 }}>
-            Recent Attendance
+            Attendance History
           </h2>
+        </div>
+        <div className="hidden md:grid grid-cols-12 gap-3 px-5 py-2 border-b border-gray-100 bg-gray-50 text-gray-400 uppercase text-[11px] font-bold tracking-wide">
+          <span className="col-span-4">Date</span>
+          <span className="col-span-2">Time</span>
+          <span className="col-span-2">Working Hours</span>
+          <span className="col-span-2">Delay Minutes</span>
+          <span className="col-span-2">Status</span>
         </div>
         <div className="divide-y divide-gray-50">
           {recentRecords.map((record) => {
             const badge = getStatusBadge(record.status);
             const isToday = record.date === TODAY;
             const duration = getDuration(record.checkIn, record.checkOut);
+            const delayMinutes = getDelayMinutes(record, currentUser, policy);
+            const computedStatus = getComputedAttendanceStatus(record, currentUser, policy);
 
             return (
               <div
                 key={record.id}
-                className={`px-5 py-3.5 flex items-center justify-between ${isToday ? 'bg-green-50/50' : ''}`}
+                className={`px-5 py-3.5 grid grid-cols-1 md:grid-cols-12 gap-3 md:items-center ${isToday ? 'bg-green-50/50' : ''}`}
               >
-                <div className="flex items-center gap-3">
+                <div className="md:col-span-4 flex items-center gap-3">
                   <div
                     className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
                       record.status === 'present'
@@ -368,9 +477,9 @@ export default function Attendance() {
                     </div>
                     <p className="text-gray-400" style={{ fontSize: '12px' }}>
                       {record.checkIn && record.checkOut
-                        ? `${formatDisplayTime(record.checkIn)} - ${formatDisplayTime(record.checkOut)} · ${duration}`
+                        ? `${formatDisplayTime(record.checkIn)} - ${formatDisplayTime(record.checkOut)} - ${duration}`
                         : record.checkIn
-                          ? `In: ${formatDisplayTime(record.checkIn)} · Still working`
+                          ? `In: ${formatDisplayTime(record.checkIn)} - Still working`
                           : '-'}
                     </p>
                     {record.editedBy && (
@@ -381,9 +490,24 @@ export default function Attendance() {
                     )}
                   </div>
                 </div>
-                <span className={`px-2.5 py-1 rounded-lg ${badge.cls}`} style={{ fontSize: '11px', fontWeight: 600 }}>
-                  {badge.label}
-                </span>
+                <div className="md:col-span-2 text-gray-600" style={{ fontSize: '12px' }}>
+                  {record.checkIn && record.checkOut
+                    ? `${formatDisplayTime(record.checkIn)} - ${formatDisplayTime(record.checkOut)}`
+                    : record.checkIn
+                      ? `In: ${formatDisplayTime(record.checkIn)}`
+                      : '-'}
+                </div>
+                <div className="md:col-span-2 text-gray-700" style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {duration}
+                </div>
+                <div className="md:col-span-2 text-gray-700" style={{ fontSize: '12px', fontWeight: 600 }}>
+                  {delayMinutes === null ? '-' : `${delayMinutes}m`}
+                </div>
+                <div className="md:col-span-2">
+                  <span className={`px-2.5 py-1 rounded-lg ${badge.cls}`} style={{ fontSize: '11px', fontWeight: 600 }}>
+                    {computedStatus}
+                  </span>
+                </div>
               </div>
             );
           })}

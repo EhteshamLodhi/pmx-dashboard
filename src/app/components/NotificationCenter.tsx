@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, CheckCheck, ExternalLink, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '../context/AppContext';
@@ -43,12 +43,38 @@ export function NotificationCenter() {
   } = useApp();
   const [open, setOpen] = useState(false);
   const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (pushNotificationsEnabled) {
       setPushMessage('Push is enabled on this device.');
     }
   }, [pushNotificationsEnabled]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (containerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [open]);
 
   const handleNotificationClick = async (notification: AppNotification) => {
     await runAction(`notification:${notification.id}`, async () => {
@@ -74,11 +100,13 @@ export function NotificationCenter() {
   const markingAllRead = isPending('notifications-read-all');
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen((value) => !value)}
         className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
         aria-label="Notifications"
+        aria-expanded={open}
+        aria-haspopup="dialog"
       >
         <Bell className="w-5 h-5" />
         {unreadNotifications > 0 && (
@@ -90,7 +118,9 @@ export function NotificationCenter() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-11 w-[min(22rem,calc(100vw-2rem))] bg-white border border-gray-100 rounded-2xl shadow-2xl z-50 overflow-hidden">
+        <>
+          <div className="fixed inset-0 z-40 bg-black/10 backdrop-blur-[1px] sm:hidden" />
+          <div className="fixed inset-x-3 top-16 bottom-20 z-50 flex min-h-0 flex-col rounded-2xl border border-gray-100 bg-white shadow-2xl overflow-hidden sm:absolute sm:inset-x-auto sm:top-11 sm:bottom-auto sm:right-0 sm:w-[22rem]">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <div>
               <p className="text-gray-900 font-semibold text-sm">Notifications</p>
@@ -109,7 +139,7 @@ export function NotificationCenter() {
             </button>
           </div>
 
-          <div className="max-h-80 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {notifications.length === 0 ? (
               <div className="px-4 py-8 text-center">
                 <Bell className="w-8 h-8 mx-auto text-gray-200 mb-2" />
@@ -171,7 +201,8 @@ export function NotificationCenter() {
             </p>
             {pushMessage && <p className="text-[11px] text-gray-500 mt-2 text-center">{pushMessage}</p>}
           </div>
-        </div>
+          </div>
+        </>
       )}
     </div>
   );

@@ -31,6 +31,7 @@ function getStatusBadge(status: LeaveRequest['status']) {
     case 'approved': return { label: 'Approved', cls: 'bg-green-100 text-green-700', icon: CheckCircle2 };
     case 'rejected': return { label: 'Rejected', cls: 'bg-red-100 text-red-700', icon: XCircle };
     case 'pending_manager': return { label: 'Pending Manager', cls: 'bg-yellow-100 text-yellow-700', icon: Clock };
+    case 'pending_project_manager': return { label: 'Pending Project Manager', cls: 'bg-amber-100 text-amber-700', icon: Clock };
     case 'pending_director': return { label: 'Pending Director', cls: 'bg-orange-100 text-orange-700', icon: Clock };
   }
 }
@@ -54,6 +55,8 @@ export default function LeaveRequestPage() {
   const [policy, setPolicy] = useState<PolicySettings>({
     defaultReportingTime: '09:00',
     checkInGraceMinutes: 15,
+    globalReportingTime: '09:00',
+    globalGracePeriod: 15,
     checkOutReminderTime: '19:00',
     sickLeaveDays: 10,
     emergencyLeaveDays: 5,
@@ -131,7 +134,7 @@ export default function LeaveRequestPage() {
 
   const approvedDays = myRequests.filter((request) => request.status === 'approved').reduce((sum, request) => sum + request.totalDays, 0);
   const pendingDays = myRequests
-    .filter((request) => request.status === 'pending_manager' || request.status === 'pending_director')
+    .filter((request) => request.status === 'pending_manager' || request.status === 'pending_project_manager' || request.status === 'pending_director')
     .reduce((sum, request) => sum + request.totalDays, 0);
   const rejectedRequests = myRequests.filter((request) => request.status === 'rejected').length;
   const canEditPolicy = currentUser?.role === 'admin' || currentUser?.role === 'director';
@@ -403,7 +406,7 @@ export default function LeaveRequestPage() {
               <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                 <p className="text-blue-600" style={{ fontSize: '12px', lineHeight: '1.5' }}>
-                  Leave requests require approval from your Line Manager and Director before they are confirmed.
+                  Leave requests require approval from your Line Manager, Project Manager, and Director before they are confirmed.
                   Sick and emergency leave do not require notice hours. Casual leave requires {policy.casualLeaveNoticeHours} hours notice and annual leave requires {policy.annualLeaveNoticeHours} hours notice.
                 </p>
               </div>

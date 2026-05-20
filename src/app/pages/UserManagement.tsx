@@ -350,6 +350,8 @@ function PolicySettingsPanel() {
   const [policy, setPolicy] = useState<PolicySettings>({
     defaultReportingTime: '09:00',
     checkInGraceMinutes: 15,
+    globalReportingTime: '09:00',
+    globalGracePeriod: 15,
     checkOutReminderTime: '19:00',
     sickLeaveDays: 10,
     emergencyLeaveDays: 5,
@@ -414,6 +416,36 @@ function PolicySettingsPanel() {
       </button>
       {open && (
         <div className="px-5 pb-5 pt-1 border-t border-gray-100">
+          <div className="mb-4 rounded-2xl border border-green-100 bg-green-50/60 p-4">
+            <div className="mb-3">
+              <p className="text-green-800 font-semibold text-sm">Global Reporting Policy</p>
+              <p className="text-green-600 text-xs mt-1">
+                Used only when an employee-specific reporting time is missing.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="text-sm text-gray-600">
+                Global Reporting Start Time
+                <input
+                  type="time"
+                  value={policy.globalReportingTime}
+                  onChange={(event) => setPolicy((value) => ({ ...value, globalReportingTime: event.target.value }))}
+                  className="mt-1 w-full px-3 py-2 border border-green-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </label>
+              <label className="text-sm text-gray-600">
+                Global Grace Period (Minutes)
+                <input
+                  type="number"
+                  min={0}
+                  value={policy.globalGracePeriod}
+                  onChange={(event) => setPolicy((value) => ({ ...value, globalGracePeriod: Number(event.target.value) }))}
+                  className="mt-1 w-full px-3 py-2 border border-green-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </label>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <label className="text-sm text-gray-600">
               Default Reporting Time

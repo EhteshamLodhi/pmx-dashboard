@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireSupabase } from '@/server/responses';
 import { requireAuthenticatedUser } from '@/server/auth';
-import { tryCreateNotification, tryCreateRoleNotification } from '@/server/notifications';
+import { tryCreateNotification } from '@/server/notifications';
 
 const leaveTypes = ['sick', 'emergency', 'casual', 'annual'] as const;
 type LeaveType = (typeof leaveTypes)[number];
@@ -120,7 +120,7 @@ export async function POST(request: Request) {
 
   const { data: employee, error: employeeError } = await admin
     .from('users')
-    .select('id, full_name, line_manager_id, director_id, sick_leave_days, emergency_leave_days, casual_leave_days, annual_leave_days')
+    .select('id, full_name, line_manager_id, project_manager_id, director_id, sick_leave_days, emergency_leave_days, casual_leave_days, annual_leave_days')
     .eq('id', authResult.user.id)
     .maybeSingle();
 
@@ -128,9 +128,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Employee profile is not configured yet.' }, { status: 400 });
   }
 
-  if (!employee.line_manager_id || !employee.director_id) {
+  if (!employee.line_manager_id || !employee.project_manager_id || !employee.director_id) {
     return NextResponse.json(
-      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a line manager and director.' },
+      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a line manager, project manager, and director.' },
       { status: 400 },
     );
   }
@@ -183,6 +183,13 @@ export async function POST(request: Request) {
     {
       leave_request_id: data.id,
       approval_level: 2,
+      approver_id: employee.project_manager_id,
+      approver_role: 'Project Manager',
+      status: 'pending',
+    },
+    {
+      leave_request_id: data.id,
+      approval_level: 3,
       approver_id: employee.director_id,
       approver_role: 'Director',
       status: 'pending',
@@ -203,14 +210,6 @@ export async function POST(request: Request) {
     sourceKey: `leave-submitted:${data.id}:manager`,
   });
 
-  await tryCreateRoleNotification(admin, ['director'], {
-    category: 'approval',
-    title: 'Leave request submitted',
-    message: `${employee.full_name} submitted a ${leaveType} leave request for ${startDate} to ${endDate}.`,
-    link: '/approvals',
-    sourceKey: `leave-submitted:${data.id}:director`,
-  });
-
   return NextResponse.json({ data }, { status: 201 });
 }
 
@@ -219,7 +218,7 @@ export async function PATCH(request: Request) {
   if (authResult.response || !authResult.user) return authResult.response;
 
   const { leaveId, level, approved, comment } = await request.json();
-  if (!leaveId || (level !== 1 && level !== 2) || typeof approved !== 'boolean') {
+  if (!leaveId || ![1, 2, 3].includes(level) || typeof approved !== 'boolean') {
     return NextResponse.json({ error: 'Invalid approval payload.' }, { status: 400 });
   }
 
@@ -234,14 +233,18 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Approver profile is not configured.' }, { status: 400 });
   }
 
-  const { data: workflow, error: workflowError } = await admin
+  const { data: workflowSteps, error: workflowError } = await admin
     .from('approval_workflow')
-    .select('id, approver_id, approval_level')
+    .select('id, approver_id, approval_level, status')
     .eq('leave_request_id', leaveId)
-    .eq('approval_level', level)
-    .maybeSingle();
+    .order('approval_level');
 
-  if (workflowError || !workflow) {
+  if (workflowError || !workflowSteps?.length) {
+    return NextResponse.json({ error: 'Approval workflow step was not found.' }, { status: 404 });
+  }
+
+  const workflow = workflowSteps.find((step) => step.approval_level === level);
+  if (!workflow) {
     return NextResponse.json({ error: 'Approval workflow step was not found.' }, { status: 404 });
   }
 
@@ -250,8 +253,24 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'You are not assigned to this approval step.' }, { status: 403 });
   }
 
+  if (workflow.status !== 'pending') {
+    return NextResponse.json({ error: 'This approval step has already been completed.' }, { status: 400 });
+  }
+
+  const previousSteps = workflowSteps.filter((step) => step.approval_level < level);
+  if (previousSteps.some((step) => step.status !== 'approved')) {
+    return NextResponse.json({ error: 'Previous approval steps must be completed first.' }, { status: 400 });
+  }
+
   const actedAt = new Date().toISOString();
-  const nextStatus = approved ? (level === 1 ? 'pending_director' : 'approved') : 'rejected';
+  const nextStatus =
+    approved
+      ? level === 1
+        ? 'pending_project_manager'
+        : level === 2
+          ? 'pending_director'
+          : 'approved'
+      : 'rejected';
 
   const { data: leave, error: leaveError } = await admin
     .from('leave_requests')
@@ -261,6 +280,16 @@ export async function PATCH(request: Request) {
 
   if (leaveError || !leave) {
     return NextResponse.json({ error: 'Leave request was not found.' }, { status: 404 });
+  }
+
+  const { data: employeeProfile, error: employeeProfileError } = await admin
+    .from('users')
+    .select('full_name, project_manager_id, director_id')
+    .eq('id', leave.employee_id)
+    .maybeSingle();
+
+  if (employeeProfileError || !employeeProfile) {
+    return NextResponse.json({ error: 'Employee profile is not configured yet.' }, { status: 400 });
   }
 
   const { error: updateWorkflowError } = await admin
@@ -289,16 +318,34 @@ export async function PATCH(request: Request) {
   }
 
   if (approved && level === 1) {
-    await tryCreateRoleNotification(admin, ['director'], {
-      category: 'approval',
-      title: 'Director approval pending',
-      message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for final approval.`,
-      link: '/approvals',
-      sourceKey: `leave-manager-approved:${leaveId}:director`,
-    });
+    const projectManagerId = employeeProfile.project_manager_id;
+    if (projectManagerId) {
+      await tryCreateNotification(admin, {
+        userId: projectManagerId,
+        category: 'approval',
+        title: 'Project manager approval pending',
+        message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for your review.`,
+        link: '/approvals',
+        sourceKey: `leave-line-manager-approved:${leaveId}:project-manager`,
+      });
+    }
   }
 
-  if (!approved || level === 2) {
+  if (approved && level === 2) {
+    const directorId = employeeProfile.director_id;
+    if (directorId) {
+      await tryCreateNotification(admin, {
+        userId: directorId,
+        category: 'approval',
+        title: 'Director approval pending',
+        message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for final approval.`,
+        link: '/approvals',
+        sourceKey: `leave-project-manager-approved:${leaveId}:director`,
+      });
+    }
+  }
+
+  if (!approved || level === 3) {
     await tryCreateNotification(admin, {
       userId: leave.employee_id,
       category: 'leave',
@@ -309,6 +356,20 @@ export async function PATCH(request: Request) {
       link: '/leave',
       sourceKey: `leave-final:${leaveId}:${approved ? 'approved' : 'rejected'}`,
     });
+  }
+
+  if (!approved) {
+    const directorId = employeeProfile.director_id;
+    if (level === 1 && directorId) {
+      await tryCreateNotification(admin, {
+        userId: directorId,
+        category: 'approval',
+        title: 'Leave request rejected',
+        message: `${employeeProfile.full_name ?? 'An employee'}'s leave request was rejected at line manager stage.`,
+        link: '/approvals',
+        sourceKey: `leave-rejected:${leaveId}:director`,
+      });
+    }
   }
 
   return NextResponse.json({ ok: true });

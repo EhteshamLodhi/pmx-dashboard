@@ -37,6 +37,14 @@ function getLeaveTypeColor(type: string) {
   }
 }
 
+function currentPendingApproval(request: LeaveRequest) {
+  return request.approvals.find((approval) => approval.status === 'pending');
+}
+
+function previousApprovalComments(request: LeaveRequest, level: 1 | 2 | 3) {
+  return request.approvals.filter((approval) => approval.level < level && approval.comment?.trim());
+}
+
 function ApprovalStepper({ request }: { request: LeaveRequest }) {
   const steps = [
     {
@@ -148,15 +156,16 @@ function RequestCard({
 }: {
   request: LeaveRequest;
   canApprove: boolean;
-  approvalLevel: 1 | 2;
-  onApprove: (id: string, level: 1 | 2, comment: string) => Promise<void>;
-  onReject: (id: string, level: 1 | 2, comment: string) => Promise<void>;
+  approvalLevel: 1 | 2 | 3;
+  onApprove: (id: string, level: 1 | 2 | 3, comment: string) => Promise<void>;
+  onReject: (id: string, level: 1 | 2 | 3, comment: string) => Promise<void>;
   isProcessing: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showActionForm, setShowActionForm] = useState(false);
   const [comment, setComment] = useState('');
   const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null);
+  const priorComments = previousApprovalComments(request, approvalLevel);
 
   const handleAction = async () => {
     if (!actionType) return;
@@ -229,6 +238,26 @@ function RequestCard({
           <p className="text-gray-400" style={{ fontSize: '10px' }}>Reason</p>
           <p className="text-gray-700 mt-0.5" style={{ fontSize: '13px' }}>{request.reason}</p>
         </div>
+
+        {priorComments.length > 0 && (
+          <div className="mt-3 rounded-lg border border-green-100 bg-green-50/60 px-3 py-2">
+            <p className="text-green-700" style={{ fontSize: '11px', fontWeight: 600 }}>
+              Previous Approval Comments
+            </p>
+            <div className="mt-2 space-y-2">
+              {priorComments.map((approval) => (
+                <div key={approval.level} className="rounded-lg bg-white/80 px-3 py-2 border border-green-100">
+                  <p className="text-gray-700" style={{ fontSize: '12px', fontWeight: 600 }}>
+                    {approval.role}
+                  </p>
+                  <p className="text-gray-500 mt-0.5" style={{ fontSize: '12px', lineHeight: '1.5' }}>
+                    "{approval.comment}"
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Action buttons for pending approvals */}
         {canApprove && !showActionForm && (
@@ -318,17 +347,11 @@ export default function Approvals() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Requests I need to approve
-  const pendingForMe = leaveRequests.filter((r) => {
+  const pendingForMe = leaveRequests.filter((request) => {
     if (!currentUser) return false;
-    if (currentUser.role === 'manager' || currentUser.role === 'admin') {
-      return r.status === 'pending_manager' &&
-        r.approvals.find((a) => a.level === 1)?.approverId === currentUser.id;
-    }
-    if (currentUser.role === 'director') {
-      return r.status === 'pending_director' &&
-        r.approvals.find((a) => a.level === 2)?.approverId === currentUser.id;
-    }
-    return false;
+    const pendingApproval = currentPendingApproval(request);
+    if (!pendingApproval) return false;
+    return currentUser.role === 'admin' || pendingApproval.approverId === currentUser.id;
   });
 
   // All requests (for manager/admin view)
@@ -338,12 +361,12 @@ export default function Approvals() {
     return r.approvals.some((a) => a.approverId === currentUser.id);
   });
 
-  const getApprovalLevel = (): 1 | 2 => {
-    if (currentUser?.role === 'director') return 2;
-    return 1;
+  const getApprovalLevel = (request: LeaveRequest): 1 | 2 | 3 => {
+    const pendingApproval = currentPendingApproval(request);
+    return (pendingApproval?.level ?? 1) as 1 | 2 | 3;
   };
 
-  const handleApprove = async (id: string, level: 1 | 2, comment: string) => {
+  const handleApprove = async (id: string, level: 1 | 2 | 3, comment: string) => {
     await runAction(`approval:${id}`, async () => {
       setActionError(null);
       await approveLeave(id, level, true, comment);
@@ -357,7 +380,7 @@ export default function Approvals() {
     });
   };
 
-  const handleReject = async (id: string, level: 1 | 2, comment: string) => {
+  const handleReject = async (id: string, level: 1 | 2 | 3, comment: string) => {
     await runAction(`approval:${id}`, async () => {
       setActionError(null);
       await approveLeave(id, level, false, comment);
@@ -448,21 +471,18 @@ export default function Approvals() {
       ) : (
         <div className="space-y-3">
           {displayList.map((request) => {
-            const isPendingForMe =
-              (currentUser?.role === 'manager' || currentUser?.role === 'admin') &&
-                request.status === 'pending_manager' &&
-                request.approvals.find((a) => a.level === 1)?.approverId === currentUser?.id
-              ||
-              currentUser?.role === 'director' &&
-                request.status === 'pending_director' &&
-                request.approvals.find((a) => a.level === 2)?.approverId === currentUser?.id;
+            const pendingApproval = currentPendingApproval(request);
+            const isPendingForMe = Boolean(
+              pendingApproval &&
+              (currentUser?.role === 'admin' || pendingApproval.approverId === currentUser?.id),
+            );
 
             return (
               <RequestCard
                 key={request.id}
                 request={request}
                 canApprove={isPendingForMe}
-                approvalLevel={getApprovalLevel()}
+                approvalLevel={getApprovalLevel(request)}
                 onApprove={handleApprove}
                 onReject={handleReject}
                 isProcessing={isPending(`approval:${request.id}`)}

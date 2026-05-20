@@ -48,6 +48,7 @@ function getLeaveStatusBadge(status: LeaveRequest['status']) {
     case 'approved': return { label: 'Approved', cls: 'bg-green-100 text-green-700' };
     case 'rejected': return { label: 'Rejected', cls: 'bg-red-100 text-red-700' };
     case 'pending_manager': return { label: 'Pending Manager', cls: 'bg-yellow-100 text-yellow-700' };
+    case 'pending_project_manager': return { label: 'Pending Project Manager', cls: 'bg-amber-100 text-amber-700' };
     case 'pending_director': return { label: 'Pending Director', cls: 'bg-orange-100 text-orange-700' };
   }
 }
@@ -269,13 +270,9 @@ export default function Dashboard() {
 
   const pendingApprovalsCount = leaveRequests.filter((r) => {
     if (!currentUser) return false;
-    if (currentUser.role === 'manager' || currentUser.role === 'admin') {
-      return r.status === 'pending_manager' && r.approvals[0]?.approverId === currentUser.id;
-    }
-    if (currentUser.role === 'director') {
-      return r.status === 'pending_director' && r.approvals[1]?.approverId === currentUser.id;
-    }
-    return false;
+    const pendingApproval = r.approvals.find((approval) => approval.status === 'pending');
+    if (!pendingApproval) return false;
+    return currentUser.role === 'admin' || pendingApproval.approverId === currentUser.id;
   }).length;
 
   const myRecords = attendanceRecords.filter((r) => r.userId === currentUser?.id);

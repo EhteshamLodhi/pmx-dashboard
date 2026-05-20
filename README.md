@@ -69,7 +69,16 @@ Run the latest `supabase/schema.sql` after pulling updates. It adds:
 
 Browser subscriptions are saved through the authenticated `POST /api/push/subscribe` route. App notifications created through the server notification helpers are inserted into Supabase and then sent to the receiver's saved browser subscriptions with VAPID Web Push, so delivery does not depend on the receiver having an active app tab open.
 
-On Vercel Hobby, high-frequency cron schedules are not allowed, so `vercel.json` does not register the reminder endpoint automatically. Keep `CRON_SECRET` in Vercel and trigger `/api/notifications/reminders` from an external scheduler if you want reminder automation on Hobby. Upgrading to Vercel Pro lets you restore a frequent built-in cron schedule.
+On Vercel Hobby, high-frequency cron schedules are not allowed, so `vercel.json` does not register the reminder endpoint automatically. This repo includes a GitHub Actions scheduler in `.github/workflows/reminder-cron.yml` that calls `/api/notifications/reminders` every 15 minutes.
+
+Add these GitHub repository secrets so the scheduler can run:
+
+```text
+REMINDER_BASE_URL=https://your-production-domain.vercel.app
+REMINDER_CRON_SECRET=match-your-vercel-CRON_SECRET
+```
+
+Keep the same `CRON_SECRET` in Vercel so the reminder endpoint stays protected.
 
 For production OAuth, add the production callback to Supabase:
 

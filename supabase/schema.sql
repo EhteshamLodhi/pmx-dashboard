@@ -15,7 +15,7 @@ begin
   end if;
 
   if not exists (select 1 from pg_type where typname = 'leave_status' and typnamespace = 'public'::regnamespace) then
-    create type public.leave_status as enum ('pending_manager', 'pending_director', 'approved', 'rejected');
+    create type public.leave_status as enum ('pending_manager', 'pending_project_manager', 'pending_director', 'approved', 'rejected');
   end if;
 
   if not exists (select 1 from pg_type where typname = 'approval_status' and typnamespace = 'public'::regnamespace) then
@@ -25,6 +25,7 @@ end
 $$;
 
 alter type public.leave_type add value if not exists 'emergency';
+alter type public.leave_status add value if not exists 'pending_project_manager';
 
 create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),
@@ -107,7 +108,7 @@ create table if not exists public.leave_requests (
 create table if not exists public.approval_workflow (
   id uuid primary key default gen_random_uuid(),
   leave_request_id uuid not null references public.leave_requests(id) on delete cascade,
-  approval_level integer not null check (approval_level in (1, 2)),
+  approval_level integer not null check (approval_level in (1, 2, 3)),
   approver_id uuid not null references public.users(id) on delete restrict,
   approver_role text not null,
   status public.approval_status not null default 'pending',
@@ -174,6 +175,8 @@ create table if not exists public.attendance_settings (
   id uuid primary key default gen_random_uuid(),
   default_reporting_time time not null default '09:00',
   check_in_grace_minutes integer not null default 15,
+  global_reporting_time time not null default '09:00',
+  global_grace_period integer not null default 15,
   check_out_reminder_time time not null default '19:00',
   minimum_leave_notice_hours integer not null default 48,
   sick_leave_days integer not null default 10,
@@ -191,6 +194,8 @@ Annual leave is for planned vacations or longer breaks and requires advance noti
 );
 
 alter table public.attendance_settings add column if not exists default_reporting_time time not null default '09:00';
+alter table public.attendance_settings add column if not exists global_reporting_time time not null default '09:00';
+alter table public.attendance_settings add column if not exists global_grace_period integer not null default 15;
 alter table public.attendance_settings add column if not exists minimum_leave_notice_hours integer not null default 48;
 alter table public.attendance_settings add column if not exists sick_leave_days integer not null default 10;
 alter table public.attendance_settings add column if not exists emergency_leave_days integer not null default 5;
@@ -206,6 +211,15 @@ Annual leave is for planned vacations or longer breaks and requires advance noti
 insert into public.attendance_settings (default_reporting_time, check_in_grace_minutes, check_out_reminder_time)
 select '09:00', 15, '19:00'
 where not exists (select 1 from public.attendance_settings);
+
+update public.attendance_settings
+set
+  global_reporting_time = coalesce(global_reporting_time, default_reporting_time, '09:00'),
+  global_grace_period = coalesce(global_grace_period, check_in_grace_minutes, 15);
+
+alter table public.approval_workflow drop constraint if exists approval_workflow_approval_level_check;
+alter table public.approval_workflow
+  add constraint approval_workflow_approval_level_check check (approval_level in (1, 2, 3));
 
 create index if not exists attendance_logs_work_date_idx on public.attendance_logs(work_date);
 create index if not exists attendance_logs_employee_date_idx on public.attendance_logs(employee_id, work_date desc);

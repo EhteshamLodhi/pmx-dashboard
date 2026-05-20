@@ -14,13 +14,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'PowerMatix Attendance Tracking Portal',
+  title: 'PowerMatix Portal',
   description: 'Enterprise attendance, leave, approvals, and admin reporting portal for PowerMatix.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'PowerMatix Attendance',
+    title: 'PowerMatix Portal',
   },
 };
 

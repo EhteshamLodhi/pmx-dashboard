@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
-import { requireUserRole } from '@/server/auth';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { requireAuthenticatedUser, requireUserRole } from '@/server/auth';
 
 function toPolicyResponse(row: Record<string, unknown>) {
   return {
     defaultReportingTime: String(row.default_reporting_time ?? '09:00').slice(0, 5),
     checkInGraceMinutes: row.check_in_grace_minutes ?? 15,
+    globalReportingTime: String(row.global_reporting_time ?? row.default_reporting_time ?? '09:00').slice(0, 5),
+    globalGracePeriod: row.global_grace_period ?? row.check_in_grace_minutes ?? 15,
     checkOutReminderTime: String(row.check_out_reminder_time ?? '19:00').slice(0, 5),
     sickLeaveDays: row.sick_leave_days ?? 10,
     emergencyLeaveDays: row.emergency_leave_days ?? 5,
@@ -21,10 +24,11 @@ function toPolicyResponse(row: Record<string, unknown>) {
 }
 
 export async function GET() {
-  const authResult = await requireUserRole(['admin', 'director']);
-  if (authResult.response || !authResult.admin) return authResult.response;
+  const authResult = await requireAuthenticatedUser();
+  if (authResult.response) return authResult.response;
 
-  const { data, error } = await authResult.admin
+  const admin = createAdminClient();
+  const { data, error } = await admin
     .from('attendance_settings')
     .select('*')
     .limit(1)
@@ -42,6 +46,8 @@ export async function PATCH(request: Request) {
   const payload = {
     default_reporting_time: body.defaultReportingTime || '09:00',
     check_in_grace_minutes: Number(body.checkInGraceMinutes ?? 15),
+    global_reporting_time: body.globalReportingTime || body.defaultReportingTime || '09:00',
+    global_grace_period: Number(body.globalGracePeriod ?? body.checkInGraceMinutes ?? 15),
     check_out_reminder_time: body.checkOutReminderTime || '19:00',
     sick_leave_days: Number(body.sickLeaveDays ?? 10),
     emergency_leave_days: Number(body.emergencyLeaveDays ?? 5),

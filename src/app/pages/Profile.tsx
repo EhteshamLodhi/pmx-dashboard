@@ -301,7 +301,7 @@ export default function Profile() {
       </button>
 
       <p className="text-center text-gray-400 mt-5" style={{ fontSize: '12px' }}>
-        PowerMatix Attendance Portal v1.0 - Copyright 2026 PowerMatix
+        PowerMatix Portal v1.0 - Copyright 2026 PowerMatix
       </p>
     </div>
   );

@@ -1,11 +1,20 @@
 'use client';
 
-import { useDeferredValue, useMemo, useState } from 'react';
-import { AlertTriangle, Calendar, CheckCircle2, Clock, Edit3, Loader2, Search, Shield, Users } from 'lucide-react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Award, BarChart3, Calendar, CheckCircle2, Clock, Edit3, Loader2, Search, Shield, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import type { AttendanceRecord, AttendanceStatus, User } from '../types';
+import type { AttendanceRecord, AttendanceStatus, PolicySettings, User } from '../types';
 import { formatDisplayTime } from '@/lib/time';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
+import {
+  averageTime,
+  filterRecordsByRange,
+  formatHours as formatDurationHours,
+  getComputedAttendanceStatus,
+  getPerformanceScore,
+  getWorkingHours,
+  type AttendanceRangeKey,
+} from '@/lib/attendance-analytics';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -36,6 +45,9 @@ export default function AdminAttendance() {
   const [project, setProject] = useState('all');
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
+  const [analyticsRange, setAnalyticsRange] = useState<AttendanceRangeKey>('month');
+  const [sortBy, setSortBy] = useState<'score' | 'project' | 'hours' | 'late'>('score');
+  const [policy, setPolicy] = useState<PolicySettings | null>(null);
   const [editing, setEditing] = useState<{ user: User; record?: AttendanceRecord } | null>(null);
   const [editForm, setEditForm] = useState({
     checkIn: '',
@@ -47,6 +59,15 @@ export default function AdminAttendance() {
 
   const activeEmployees = users.filter((user) => user.isActive && user.role !== 'admin');
   const projects = Array.from(new Set(activeEmployees.map((user) => user.project ?? 'Unassigned')));
+
+  useEffect(() => {
+    fetch('/api/admin/policies', { credentials: 'include' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (body?.data) setPolicy(body.data);
+      })
+      .catch(() => setPolicy(null));
+  }, []);
 
   const rows = useMemo(() => {
     return activeEmployees
@@ -65,6 +86,45 @@ export default function AdminAttendance() {
     late: rows.filter(({ record }) => record?.status === 'late').length,
     leave: rows.filter(({ record }) => record?.status === 'on-leave').length,
   };
+
+  const analyticsRows = useMemo(() => {
+    const baseRows = rows.map(({ user }) => {
+      const userRecords = filterRecordsByRange(
+        attendanceRecords.filter((record) => record.userId === user.id),
+        analyticsRange,
+      );
+      const todayRecord = attendanceRecords.find((record) => record.userId === user.id && record.date === selectedDate);
+      const totalWorkingHours = userRecords.reduce((sum, record) => sum + getWorkingHours(record), 0);
+      const lateCount = userRecords.filter((record) => {
+        const status = getComputedAttendanceStatus(record, user, policy);
+        return status === 'Late' || status === 'Very Late';
+      }).length;
+      const absenceCount = userRecords.filter((record) => getComputedAttendanceStatus(record, user, policy) === 'Absent').length;
+      const presentDays = userRecords.filter((record) => record.checkIn && getComputedAttendanceStatus(record, user, policy) !== 'Absent').length;
+      const score = getPerformanceScore(userRecords, user, policy);
+
+      return {
+        user,
+        todayRecord,
+        averageArrival: averageTime(userRecords.filter((record) => record.checkIn), 'checkIn'),
+        averageDeparture: averageTime(userRecords.filter((record) => record.checkOut), 'checkOut'),
+        totalWorkingHours,
+        presentDays,
+        absentDays: absenceCount,
+        lateCount,
+        score,
+      };
+    });
+
+    const sorted = [...baseRows].sort((a, b) => {
+      if (sortBy === 'project') return (a.user.project ?? '').localeCompare(b.user.project ?? '');
+      if (sortBy === 'hours') return b.totalWorkingHours - a.totalWorkingHours;
+      if (sortBy === 'late') return a.lateCount - b.lateCount;
+      return b.score - a.score;
+    });
+
+    return sorted.map((row, index) => ({ ...row, rank: index + 1 }));
+  }, [analyticsRange, attendanceRecords, policy, rows, selectedDate, sortBy]);
 
   const openEdit = (user: User, record?: AttendanceRecord) => {
     setEditing({ user, record });
@@ -105,13 +165,16 @@ export default function AdminAttendance() {
   };
   const savingEdit = editing ? isPending(`admin-attendance:${editing.user.id}:${selectedDate}`) : false;
 
-  if (currentUser?.role !== 'admin') {
+  const canViewAnalytics = currentUser?.role === 'admin' || currentUser?.role === 'director';
+  const canEditAttendance = currentUser?.role === 'admin';
+
+  if (!canViewAnalytics) {
     return (
       <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <div className="bg-red-50 border border-red-100 rounded-2xl p-6 text-red-700">
           <Shield className="w-6 h-6 mb-2" />
-          <p className="font-semibold">Admin access required</p>
-          <p className="text-sm text-red-500 mt-1">Employees cannot edit attendance entries.</p>
+          <p className="font-semibold">Admin or director access required</p>
+          <p className="text-sm text-red-500 mt-1">Employees cannot access organization attendance analytics.</p>
         </div>
       </div>
     );
@@ -131,7 +194,7 @@ export default function AdminAttendance() {
             </div>
           </div>
           <div className="hidden sm:block text-right text-green-100 text-xs">
-            PowerMatix Attendance Tracking Portal
+            PowerMatix Portal
           </div>
         </div>
       </div>
@@ -188,6 +251,107 @@ export default function AdminAttendance() {
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-green-600" />
+            <div>
+              <h2 className="text-gray-900 font-semibold">Attendance Analytics</h2>
+              <p className="text-gray-400 text-xs">Hybrid scoring with individual reporting time and global fallback</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={analyticsRange}
+              onChange={(event) => setAnalyticsRange(event.target.value as AttendanceRangeKey)}
+              className="px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-700 outline-none focus:ring-2 focus:ring-green-500 text-sm"
+            >
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="quarter">This Quarter</option>
+              <option value="year">This Year</option>
+            </select>
+            <select
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as 'score' | 'project' | 'hours' | 'late')}
+              className="px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-700 outline-none focus:ring-2 focus:ring-green-500 text-sm"
+            >
+              <option value="score">Sort: Score</option>
+              <option value="project">Sort: Project</option>
+              <option value="hours">Sort: Working Hours</option>
+              <option value="late">Sort: Late Count</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="p-4 border-b border-gray-100">
+          <div className="flex items-center gap-2 mb-3">
+            <Award className="w-4 h-4 text-amber-500" />
+            <h3 className="text-gray-900 font-semibold text-sm">Leaderboard</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-400 uppercase text-[11px] tracking-wide">
+                <tr>
+                  {['Rank', 'Employee Name', 'Project', 'Check-in Today', 'Check-out Today', 'Avg Arrival', 'Avg Departure', 'Working Hours', 'Late', 'Absent', 'Score'].map((label) => (
+                    <th key={label} className="text-left px-3 py-2 font-bold whitespace-nowrap">{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {analyticsRows.slice(0, 10).map((row) => (
+                  <tr key={row.user.id} className={row.rank <= 3 ? 'bg-green-50/50' : undefined}>
+                    <td className="px-3 py-2 font-bold text-green-700">#{row.rank}</td>
+                    <td className="px-3 py-2 font-semibold text-gray-900">{row.user.name}</td>
+                    <td className="px-3 py-2 text-gray-600">{row.user.project ?? 'Unassigned'}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatDisplayTime(row.todayRecord?.checkIn)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatDisplayTime(row.todayRecord?.checkOut)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatDisplayTime(row.averageArrival)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatDisplayTime(row.averageDeparture)}</td>
+                    <td className="px-3 py-2 text-gray-700 font-semibold">{formatDurationHours(row.totalWorkingHours)}</td>
+                    <td className="px-3 py-2 text-orange-700">{row.lateCount}</td>
+                    <td className="px-3 py-2 text-red-700">{row.absentDays}</td>
+                    <td className="px-3 py-2 font-bold text-green-700">{row.score}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="p-4">
+          <h3 className="text-gray-900 font-semibold text-sm mb-3">Global Attendance Table</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-400 uppercase text-[11px] tracking-wide">
+                <tr>
+                  {['Employee Name', 'Project', 'Avg Arrival', 'Avg Departure', 'Total Working Hours', 'Present Days', 'Absent Days', 'Late Days', 'Performance Score', 'Rank'].map((label) => (
+                    <th key={label} className="text-left px-3 py-2 font-bold whitespace-nowrap">{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {analyticsRows.map((row) => (
+                  <tr key={row.user.id}>
+                    <td className="px-3 py-2 font-semibold text-gray-900">{row.user.name}</td>
+                    <td className="px-3 py-2 text-gray-600">{row.user.project ?? 'Unassigned'}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatDisplayTime(row.averageArrival)}</td>
+                    <td className="px-3 py-2 text-gray-600">{formatDisplayTime(row.averageDeparture)}</td>
+                    <td className="px-3 py-2 text-gray-700 font-semibold">{formatDurationHours(row.totalWorkingHours)}</td>
+                    <td className="px-3 py-2 text-green-700">{row.presentDays}</td>
+                    <td className="px-3 py-2 text-red-700">{row.absentDays}</td>
+                    <td className="px-3 py-2 text-orange-700">{row.lateCount}</td>
+                    <td className="px-3 py-2 font-bold text-green-700">{row.score}</td>
+                    <td className="px-3 py-2 font-bold text-gray-700">#{row.rank}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {canEditAttendance && (
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
           <div>
             <h2 className="text-gray-900 font-semibold">Attendance Report</h2>
@@ -238,6 +402,7 @@ export default function AdminAttendance() {
           </table>
         </div>
       </div>
+      )}
 
       {editing && (
         <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">

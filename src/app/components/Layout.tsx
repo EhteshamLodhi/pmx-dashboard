@@ -60,13 +60,9 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const pendingApprovals = leaveRequests.filter((r) => {
     if (!currentUser) return false;
-    if (currentUser.role === 'manager' || currentUser.role === 'admin') {
-      return r.status === 'pending_manager' && r.approvals[0]?.approverId === currentUser.id;
-    }
-    if (currentUser.role === 'director') {
-      return r.status === 'pending_director' && r.approvals[1]?.approverId === currentUser.id;
-    }
-    return false;
+    const pendingApproval = r.approvals.find((approval) => approval.status === 'pending');
+    if (!pendingApproval) return false;
+    return currentUser.role === 'admin' || pendingApproval.approverId === currentUser.id;
   }).length;
 
   useEffect(() => {
