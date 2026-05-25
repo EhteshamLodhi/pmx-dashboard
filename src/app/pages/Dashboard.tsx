@@ -39,6 +39,8 @@ function getStatusBadge(status: string) {
     case 'absent': return { label: 'Absent', cls: 'bg-red-100 text-red-700', dot: 'bg-red-500' };
     case 'on-leave': return { label: 'On Leave', cls: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' };
     case 'half-day': return { label: 'Half Day', cls: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' };
+    case 'holiday': return { label: 'Holiday', cls: 'bg-sky-100 text-sky-700', dot: 'bg-sky-500' };
+    case 'weekly-off': return { label: 'Weekly Off', cls: 'bg-gray-100 text-gray-600', dot: 'bg-gray-500' };
     default: return { label: 'Not In', cls: 'bg-gray-100 text-gray-500', dot: 'bg-gray-400' };
   }
 }

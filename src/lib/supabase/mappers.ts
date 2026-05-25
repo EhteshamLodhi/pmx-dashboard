@@ -2,6 +2,8 @@ import type {
   AppNotification,
   AttendanceRecord,
   AttendanceStatus,
+  Holiday,
+  HolidayType,
   LeaveApproval,
   LeaveRequest,
   LeaveStatus,
@@ -47,6 +49,15 @@ type DbAttendanceRow = {
   edited_at?: string | null;
   edited_by?: string | null;
   editor?: { full_name?: string | null } | null;
+};
+
+type DbHolidayRow = {
+  id: string;
+  holiday_name: string;
+  holiday_date: string;
+  recurring?: boolean | null;
+  holiday_type?: HolidayType | null;
+  description?: string | null;
 };
 
 type DbApprovalRow = {
@@ -142,6 +153,17 @@ export function mapAttendanceRecord(row: DbAttendanceRow): AttendanceRecord {
     notes: row.remarks ?? undefined,
     editedBy: row.editor?.full_name ?? row.edited_by ?? undefined,
     editedAt: row.edited_at ?? undefined,
+  };
+}
+
+export function mapHoliday(row: DbHolidayRow): Holiday {
+  return {
+    id: row.id,
+    name: row.holiday_name,
+    date: row.holiday_date,
+    recurring: row.recurring ?? false,
+    type: row.holiday_type ?? 'public',
+    description: row.description ?? undefined,
   };
 }
 

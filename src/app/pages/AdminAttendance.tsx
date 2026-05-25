@@ -15,6 +15,7 @@ import {
   getWorkingHours,
   type AttendanceRangeKey,
 } from '@/lib/attendance-analytics';
+import { getNonWorkingStatus } from '@/lib/attendance-calendar';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -24,6 +25,8 @@ function getStatusMeta(status: AttendanceStatus | 'absent') {
     case 'late': return { label: 'Late', badge: 'bg-orange-100 text-orange-700', row: 'bg-orange-50/75' };
     case 'checked-in-only': return { label: 'Checked In Only', badge: 'bg-yellow-100 text-yellow-700', row: 'bg-yellow-50/60' };
     case 'on-leave': return { label: 'On Leave', badge: 'bg-blue-100 text-blue-700', row: 'bg-blue-50/60' };
+    case 'holiday': return { label: 'Holiday', badge: 'bg-sky-100 text-sky-700', row: 'bg-sky-50/70' };
+    case 'weekly-off': return { label: 'Weekly Off', badge: 'bg-gray-100 text-gray-600', row: 'bg-gray-50/80' };
     default: return { label: 'Absent', badge: 'bg-red-100 text-red-700', row: 'bg-red-50/75' };
   }
 }
@@ -39,12 +42,13 @@ function formatHours(record?: AttendanceRecord) {
 }
 
 export default function AdminAttendance() {
-  const { users, attendanceRecords, updateAttendanceRecord, addAttendanceRecord, currentUser } = useApp();
+  const { users, attendanceRecords, leaveRequests, holidays, updateAttendanceRecord, addAttendanceRecord, currentUser } = useApp();
   const { isPending, runAction } = useActionRunner();
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const [project, setProject] = useState('all');
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
+  const [statusFilter, setStatusFilter] = useState<'all' | AttendanceStatus | 'absent'>('all');
   const [analyticsRange, setAnalyticsRange] = useState<AttendanceRangeKey>('month');
   const [sortBy, setSortBy] = useState<'score' | 'project' | 'hours' | 'late'>('score');
   const [policy, setPolicy] = useState<PolicySettings | null>(null);
@@ -73,18 +77,29 @@ export default function AdminAttendance() {
     return activeEmployees
       .filter((user) => project === 'all' || (user.project ?? 'Unassigned') === project)
       .filter((user) => !deferredSearch || `${user.name} ${user.email} ${user.project ?? ''}`.toLowerCase().includes(deferredSearch.toLowerCase()))
-      .map((user) => ({
-        user,
-        record: attendanceRecords.find((record) => record.userId === user.id && record.date === selectedDate),
-      }));
-  }, [activeEmployees, attendanceRecords, deferredSearch, project, selectedDate]);
+      .map((user) => {
+        const record = attendanceRecords.find((item) => item.userId === user.id && item.date === selectedDate);
+        const nonWorkingStatus = getNonWorkingStatus({
+          date: selectedDate,
+          userId: user.id,
+          holidays,
+          policy,
+          leaveRequests,
+        });
+        const effectiveStatus = record?.status ?? nonWorkingStatus ?? 'absent';
+        return { user, record, effectiveStatus };
+      })
+      .filter((row) => statusFilter === 'all' || row.effectiveStatus === statusFilter);
+  }, [activeEmployees, attendanceRecords, deferredSearch, holidays, leaveRequests, policy, project, selectedDate, statusFilter]);
 
   const summary = {
     total: rows.length,
-    present: rows.filter(({ record }) => record?.status === 'present' || record?.status === 'checked-in-only').length,
-    absent: rows.filter(({ record }) => !record || record.status === 'absent').length,
-    late: rows.filter(({ record }) => record?.status === 'late').length,
-    leave: rows.filter(({ record }) => record?.status === 'on-leave').length,
+    present: rows.filter(({ effectiveStatus }) => effectiveStatus === 'present' || effectiveStatus === 'checked-in-only').length,
+    absent: rows.filter(({ effectiveStatus }) => effectiveStatus === 'absent').length,
+    late: rows.filter(({ effectiveStatus }) => effectiveStatus === 'late').length,
+    leave: rows.filter(({ effectiveStatus }) => effectiveStatus === 'on-leave').length,
+    holiday: rows.filter(({ effectiveStatus }) => effectiveStatus === 'holiday').length,
+    weeklyOff: rows.filter(({ effectiveStatus }) => effectiveStatus === 'weekly-off').length,
   };
 
   const analyticsRows = useMemo(() => {
@@ -200,7 +215,7 @@ export default function AdminAttendance() {
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <label className="text-sm text-gray-600">
             Date
             <input
@@ -229,16 +244,34 @@ export default function AdminAttendance() {
               />
             </div>
           </label>
+          <label className="text-sm text-gray-600">
+            Status
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+              className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="all">All statuses</option>
+              <option value="present">Present</option>
+              <option value="late">Late</option>
+              <option value="absent">Absent</option>
+              <option value="on-leave">On Leave</option>
+              <option value="holiday">Holiday</option>
+              <option value="weekly-off">Weekly Off</option>
+            </select>
+          </label>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
         {[
           { label: 'Total Employees', value: summary.total, icon: Users, color: 'text-gray-900', bg: 'bg-gray-50' },
           { label: 'Present Today', value: summary.present, icon: CheckCircle2, color: 'text-green-700', bg: 'bg-green-50' },
           { label: 'Absent Today', value: summary.absent, icon: AlertTriangle, color: 'text-red-700', bg: 'bg-red-50' },
           { label: 'Late Employees', value: summary.late, icon: Clock, color: 'text-orange-700', bg: 'bg-orange-50' },
           { label: 'On Leave', value: summary.leave, icon: Calendar, color: 'text-blue-700', bg: 'bg-blue-50' },
+          { label: 'Holiday', value: summary.holiday, icon: Calendar, color: 'text-sky-700', bg: 'bg-sky-50' },
+          { label: 'Weekly Off', value: summary.weeklyOff, icon: Calendar, color: 'text-gray-700', bg: 'bg-gray-50' },
         ].map((card) => (
           <div key={card.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <div className={`w-9 h-9 ${card.bg} rounded-xl flex items-center justify-center mb-3`}>
@@ -374,8 +407,8 @@ export default function AdminAttendance() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {rows.map(({ user, record }) => {
-                const status = record?.status ?? 'absent';
+              {rows.map(({ user, record, effectiveStatus }) => {
+                const status = effectiveStatus;
                 const meta = getStatusMeta(status);
                 return (
                   <tr key={user.id} className={`${meta.row} hover:bg-green-50 transition-colors`}>
@@ -430,6 +463,8 @@ export default function AdminAttendance() {
                   <option value="checked-in-only">Checked In Only</option>
                   <option value="absent">Absent</option>
                   <option value="on-leave">On Leave</option>
+                  <option value="holiday">Holiday</option>
+                  <option value="weekly-off">Weekly Off</option>
                 </select>
               </label>
               <label className="text-sm text-gray-600 block">

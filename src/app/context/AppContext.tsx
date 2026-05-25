@@ -2,9 +2,9 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
-import type { AppNotification, AttendanceRecord, AttendanceStatus, LeaveRequest, LeaveType, User } from '../types';
+import type { AppNotification, AttendanceRecord, AttendanceStatus, Holiday, LeaveRequest, LeaveType, User } from '../types';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
-import { mapAttendanceRecord, mapLeaveRequest, mapNotification, mapUser } from '@/lib/supabase/mappers';
+import { mapAttendanceRecord, mapHoliday, mapLeaveRequest, mapNotification, mapUser } from '@/lib/supabase/mappers';
 
 interface AppContextType {
   isLoggedIn: boolean;
@@ -13,6 +13,7 @@ interface AppContextType {
   users: User[];
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
+  holidays: Holiday[];
   notifications: AppNotification[];
   unreadNotifications: number;
   pushNotificationsEnabled: boolean;
@@ -29,6 +30,7 @@ interface AppContextType {
     endDate: string;
     reason: string;
   }) => Promise<void>;
+  deleteLeaveRequest: (leaveId: string) => Promise<void>;
   approveLeave: (leaveId: string, level: 1 | 2 | 3, approved: boolean, comment: string) => Promise<void>;
   updateAttendanceRecord: (id: string, updates: Partial<AttendanceRecord>) => Promise<void>;
   addAttendanceRecord: (record: Omit<AttendanceRecord, 'id'>) => Promise<void>;
@@ -122,6 +124,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState(false);
   const deliveredNotificationIds = useRef<Set<string>>(new Set());
@@ -165,6 +168,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUsers([]);
         setAttendanceRecords([]);
         setLeaveRequests([]);
+        setHolidays([]);
         setNotifications([]);
         setIsLoggedIn(false);
         setIsLoading(false);
@@ -179,7 +183,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await bootstrapProfile();
         const me = await fetchCurrentProfile();
 
-        const [usersResult, attendanceResult, leaveResult, notificationResult] = await Promise.allSettled([
+        const [usersResult, attendanceResult, leaveResult, holidayResult, notificationResult] = await Promise.allSettled([
           supabase
             .from('users')
             .select('*, project:project_id(name)')
@@ -205,6 +209,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             `)
             .order('submitted_at', { ascending: false }),
           supabase
+            .from('holidays')
+            .select('*')
+            .order('holiday_date', { ascending: true }),
+          supabase
             .from('notifications')
             .select('*')
             .order('created_at', { ascending: false })
@@ -217,6 +225,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const attendanceError = attendanceResult.status === 'fulfilled' ? attendanceResult.value.error : attendanceResult.reason;
         const leaveData = leaveResult.status === 'fulfilled' ? leaveResult.value.data ?? [] : [];
         const leaveError = leaveResult.status === 'fulfilled' ? leaveResult.value.error : leaveResult.reason;
+        const holidayData = holidayResult.status === 'fulfilled' ? holidayResult.value.data ?? [] : [];
+        const holidayError = holidayResult.status === 'fulfilled' ? holidayResult.value.error : holidayResult.reason;
         const notificationData = notificationResult.status === 'fulfilled' ? notificationResult.value.data ?? [] : [];
         const notificationError =
           notificationResult.status === 'fulfilled' ? notificationResult.value.error : notificationResult.reason;
@@ -230,6 +240,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (leaveError) {
           console.error('Leave query failed during session sync', leaveError);
         }
+        if (holidayError) {
+          console.error('Holiday query failed during session sync', holidayError);
+        }
         if (notificationError) {
           console.error('Notification query failed during session sync', notificationError);
         }
@@ -237,6 +250,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const mappedUsers = (usersData as Parameters<typeof mapUser>[0][]).map(mapUser);
         const mappedAttendance = (attendanceData as Parameters<typeof mapAttendanceRecord>[0][]).map(mapAttendanceRecord);
         const mappedLeaves = (leaveData as Parameters<typeof mapLeaveRequest>[0][]).map(mapLeaveRequest);
+        const mappedHolidays = (holidayData as Parameters<typeof mapHoliday>[0][]).map(mapHoliday);
         const mappedNotifications = (notificationData as Parameters<typeof mapNotification>[0][]).map(mapNotification);
         const resolvedCurrentUser = me ?? mappedUsers.find((item) => item.id === session.user.id) ?? null;
         const resolvedUsers =
@@ -247,6 +261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUsers(resolvedUsers);
         setAttendanceRecords(mappedAttendance);
         setLeaveRequests(mappedLeaves);
+        setHolidays(mappedHolidays);
         setNotifications(mappedNotifications);
         setCurrentUser(resolvedCurrentUser);
         setIsLoggedIn(Boolean(resolvedCurrentUser));
@@ -255,6 +270,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUsers([]);
         setAttendanceRecords([]);
         setLeaveRequests([]);
+        setHolidays([]);
         setNotifications([]);
         setCurrentUser(null);
         setIsLoggedIn(false);
@@ -724,6 +740,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [currentUser, refreshData, users],
   );
 
+  const deleteLeaveRequest = useCallback(
+    async (leaveId: string) => {
+      const previous = leaveRequests;
+      setLeaveRequests((requests) => requests.filter((request) => request.id !== leaveId));
+
+      const response = await fetch(`/api/leave-requests?leaveId=${encodeURIComponent(leaveId)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        setLeaveRequests(previous);
+        throw new Error(await parseApiError(response));
+      }
+
+      void refreshData();
+    },
+    [leaveRequests, refreshData],
+  );
+
   const approveLeave = useCallback(
     async (leaveId: string, level: 1 | 2 | 3, approved: boolean, comment: string) => {
       const response = await fetch('/api/leave-requests', {
@@ -998,6 +1034,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         users,
         attendanceRecords,
         leaveRequests,
+        holidays,
         notifications,
         unreadNotifications,
         pushNotificationsEnabled,
@@ -1009,6 +1046,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         checkIn,
         checkOut,
         submitLeaveRequest,
+        deleteLeaveRequest,
         approveLeave,
         updateAttendanceRecord,
         addAttendanceRecord,

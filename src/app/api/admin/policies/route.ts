@@ -1,14 +1,27 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAuthenticatedUser, requireUserRole } from '@/server/auth';
+import { normalizeWeekdays, type WeekDay } from '@/lib/attendance-calendar';
+
+const DEFAULT_WORKING_DAYS: WeekDay[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+const DEFAULT_WEEKLY_OFF_DAYS: WeekDay[] = ['saturday', 'sunday'];
 
 function toPolicyResponse(row: Record<string, unknown>) {
+  const weeklyOffDays = normalizeWeekdays(row.weekly_off_days, DEFAULT_WEEKLY_OFF_DAYS);
+  const workingDays = normalizeWeekdays(
+    row.working_days,
+    DEFAULT_WORKING_DAYS.filter((day) => !weeklyOffDays.includes(day)),
+  );
+
   return {
     defaultReportingTime: String(row.default_reporting_time ?? '09:00').slice(0, 5),
     checkInGraceMinutes: row.check_in_grace_minutes ?? 15,
     globalReportingTime: String(row.global_reporting_time ?? row.default_reporting_time ?? '09:00').slice(0, 5),
     globalGracePeriod: row.global_grace_period ?? row.check_in_grace_minutes ?? 15,
     checkOutReminderTime: String(row.check_out_reminder_time ?? '19:00').slice(0, 5),
+    workingDays,
+    weeklyOffDays,
+    workWeekEffectiveFrom: String(row.work_week_effective_from ?? new Date().toISOString().split('T')[0]).slice(0, 10),
     sickLeaveDays: row.sick_leave_days ?? 10,
     emergencyLeaveDays: row.emergency_leave_days ?? 5,
     casualLeaveDays: row.casual_leave_days ?? 10,
@@ -43,12 +56,20 @@ export async function PATCH(request: Request) {
   if (authResult.response || !authResult.admin) return authResult.response;
 
   const body = await request.json();
+  const weeklyOffDays = normalizeWeekdays(body.weeklyOffDays, DEFAULT_WEEKLY_OFF_DAYS);
+  const workingDays = normalizeWeekdays(
+    body.workingDays,
+    DEFAULT_WORKING_DAYS.filter((day) => !weeklyOffDays.includes(day)),
+  );
   const payload = {
     default_reporting_time: body.defaultReportingTime || '09:00',
     check_in_grace_minutes: Number(body.checkInGraceMinutes ?? 15),
     global_reporting_time: body.globalReportingTime || body.defaultReportingTime || '09:00',
     global_grace_period: Number(body.globalGracePeriod ?? body.checkInGraceMinutes ?? 15),
     check_out_reminder_time: body.checkOutReminderTime || '19:00',
+    working_days: workingDays,
+    weekly_off_days: weeklyOffDays,
+    work_week_effective_from: body.workWeekEffectiveFrom || new Date().toISOString().split('T')[0],
     sick_leave_days: Number(body.sickLeaveDays ?? 10),
     emergency_leave_days: Number(body.emergencyLeaveDays ?? 5),
     casual_leave_days: Number(body.casualLeaveDays ?? 10),

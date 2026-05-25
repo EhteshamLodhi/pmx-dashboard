@@ -22,7 +22,15 @@ export interface User {
   phone?: string;
 }
 
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'checked-in-only' | 'half-day' | 'on-leave';
+export type AttendanceStatus =
+  | 'present'
+  | 'absent'
+  | 'late'
+  | 'checked-in-only'
+  | 'half-day'
+  | 'on-leave'
+  | 'holiday'
+  | 'weekly-off';
 
 export interface AttendanceRecord {
   id: string;
@@ -35,6 +43,17 @@ export interface AttendanceRecord {
   notes?: string;
   editedBy?: string;
   editedAt?: string;
+}
+
+export type HolidayType = 'public' | 'company' | 'optional';
+
+export interface Holiday {
+  id: string;
+  name: string;
+  date: string;
+  recurring: boolean;
+  type: HolidayType;
+  description?: string;
 }
 
 export type LeaveType = 'sick' | 'emergency' | 'casual' | 'annual';
@@ -84,6 +103,9 @@ export interface PolicySettings {
   globalReportingTime: string;
   globalGracePeriod: number;
   checkOutReminderTime: string;
+  workingDays: string[];
+  weeklyOffDays: string[];
+  workWeekEffectiveFrom: string;
   sickLeaveDays: number;
   emergencyLeaveDays: number;
   casualLeaveDays: number;

@@ -1,10 +1,12 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Users, Search, Edit3, Check, X, ChevronDown, Shield, UserCheck, UserX, PlusCircle, SlidersHorizontal, Loader2 } from 'lucide-react';
+import { Users, Search, Edit3, Check, X, ChevronDown, Shield, UserCheck, UserX, PlusCircle, SlidersHorizontal, Loader2, CalendarPlus, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import type { PolicySettings, User } from '../types';
+import type { Holiday, HolidayType, PolicySettings, User } from '../types';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
+import { WEEK_DAYS, weekdayLabel } from '@/lib/attendance-calendar';
+import { mapHoliday } from '@/lib/supabase/mappers';
 
 function getRoleBadge(role: User['role']) {
   switch (role) {
@@ -342,6 +344,252 @@ function UserRow({
   );
 }
 
+function getHolidayTypeLabel(type: HolidayType) {
+  if (type === 'company') return 'Company Holiday';
+  if (type === 'optional') return 'Optional Holiday';
+  return 'Public Holiday';
+}
+
+function HolidayManagementPanel() {
+  const { holidays, refreshData } = useApp();
+  const { isPending, runAction } = useActionRunner();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Holiday | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [localHolidays, setLocalHolidays] = useState<Holiday[]>(holidays);
+  const [form, setForm] = useState({
+    name: '',
+    date: '',
+    type: 'public' as HolidayType,
+    recurring: false,
+    description: '',
+  });
+
+  useEffect(() => {
+    setLocalHolidays(holidays);
+  }, [holidays]);
+
+  const resetForm = () => {
+    setEditing(null);
+    setForm({ name: '', date: '', type: 'public', recurring: false, description: '' });
+  };
+
+  const beginEdit = (holiday: Holiday) => {
+    setEditing(holiday);
+    setForm({
+      name: holiday.name,
+      date: holiday.date,
+      type: holiday.type,
+      recurring: holiday.recurring,
+      description: holiday.description ?? '',
+    });
+  };
+
+  const saveHoliday = async () => {
+    await runAction(`holiday-save:${editing?.id ?? 'new'}`, async () => {
+      setMessage(null);
+      const response = await fetch('/api/admin/holidays', {
+        method: editing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          id: editing?.id,
+          ...form,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? 'Unable to save holiday.');
+      }
+
+      const body = (await response.json()) as { data?: Parameters<typeof mapHoliday>[0] };
+      if (body.data) {
+        const savedHoliday = mapHoliday(body.data);
+        setLocalHolidays((items) =>
+          editing
+            ? items.map((item) => (item.id === savedHoliday.id ? savedHoliday : item))
+            : [...items, savedHoliday].sort((a, b) => a.date.localeCompare(b.date)),
+        );
+      }
+
+      resetForm();
+      setMessage('Holiday saved.');
+      void refreshData();
+    }, {
+      loading: 'Saving holiday...',
+      success: 'Holiday saved.',
+      error: 'Unable to save holiday.',
+    }).catch((error) => {
+      setMessage(error instanceof Error ? error.message : 'Unable to save holiday.');
+    });
+  };
+
+  const deleteHoliday = async (holiday: Holiday) => {
+    const confirmed = window.confirm('Are you sure you want to delete this holiday?');
+    if (!confirmed) return;
+
+    const previous = localHolidays;
+    await runAction(`holiday-delete:${holiday.id}`, async () => {
+      setMessage(null);
+      setLocalHolidays((items) => items.filter((item) => item.id !== holiday.id));
+
+      const response = await fetch(`/api/admin/holidays?id=${encodeURIComponent(holiday.id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        setLocalHolidays(previous);
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? 'Unable to delete holiday.');
+      }
+
+      setMessage('Holiday deleted.');
+      void refreshData();
+    }, {
+      loading: 'Deleting holiday...',
+      success: 'Holiday deleted.',
+      error: 'Unable to delete holiday.',
+    }).catch((error) => {
+      setMessage(error instanceof Error ? error.message : 'Unable to delete holiday.');
+    });
+  };
+
+  const savingHoliday = isPending(`holiday-save:${editing?.id ?? 'new'}`);
+
+  return (
+    <div className="my-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <button
+        onClick={() => setOpen((value) => !value)}
+        className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-green-50 transition-colors"
+      >
+        <span className="flex items-center gap-2 text-green-700 font-semibold text-sm">
+          <CalendarPlus className="w-4 h-4" />
+          Holiday Management
+        </span>
+        <ChevronDown className={`w-4 h-4 text-green-600 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="px-5 pb-5 pt-1 border-t border-gray-100">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="text-sm text-gray-600">
+              Holiday Name
+              <input
+                value={form.name}
+                onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))}
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+            <label className="text-sm text-gray-600">
+              Holiday Date
+              <input
+                type="date"
+                value={form.date}
+                onChange={(event) => setForm((value) => ({ ...value, date: event.target.value }))}
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+            <label className="text-sm text-gray-600">
+              Holiday Type
+              <select
+                value={form.type}
+                onChange={(event) => setForm((value) => ({ ...value, type: event.target.value as HolidayType }))}
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="public">Public Holiday</option>
+                <option value="company">Company Holiday</option>
+                <option value="optional">Optional Holiday</option>
+              </select>
+            </label>
+            <label className="text-sm text-gray-600">
+              Description
+              <input
+                value={form.description}
+                onChange={(event) => setForm((value) => ({ ...value, description: event.target.value }))}
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2">
+            <span className="text-sm text-gray-700">Repeat every year</span>
+            <button
+              type="button"
+              onClick={() => setForm((value) => ({ ...value, recurring: !value.recurring }))}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${form.recurring ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-gray-500'}`}
+            >
+              {form.recurring ? 'Recurring' : 'One Time'}
+            </button>
+          </div>
+
+          <div className="mt-4 flex gap-3">
+            {editing && (
+              <button
+                onClick={resetForm}
+                disabled={savingHoliday}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel Edit
+              </button>
+            )}
+            <button
+              onClick={() => void saveHoliday()}
+              disabled={savingHoliday || !form.name.trim() || !form.date}
+              className="flex-1 py-2.5 rounded-xl bg-green-600 text-white hover:bg-green-700 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {savingHoliday ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving...
+                </span>
+              ) : editing ? 'Update Holiday' : 'Add Holiday'}
+            </button>
+          </div>
+
+          {message && (
+            <div className="mt-3 rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-700">
+              {message}
+            </div>
+          )}
+
+          <div className="mt-5 space-y-2">
+            {localHolidays.map((holiday) => (
+              <div key={holiday.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-gray-900 font-semibold text-sm">{holiday.name}</p>
+                  <p className="text-gray-500 text-xs">
+                    {holiday.date} - {getHolidayTypeLabel(holiday.type)}{holiday.recurring ? ' - recurring' : ''}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button onClick={() => beginEdit(holiday)} className="p-2 rounded-lg text-green-600 hover:bg-green-50">
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => void deleteHoliday(holiday)}
+                    disabled={isPending(`holiday-delete:${holiday.id}`)}
+                    className="p-2 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-60"
+                  >
+                    {isPending(`holiday-delete:${holiday.id}`) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {localHolidays.length === 0 && (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center text-sm text-gray-400">
+                No holidays configured yet.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PolicySettingsPanel() {
   const { runAction } = useActionRunner();
   const [open, setOpen] = useState(false);
@@ -353,6 +601,9 @@ function PolicySettingsPanel() {
     globalReportingTime: '09:00',
     globalGracePeriod: 15,
     checkOutReminderTime: '19:00',
+    workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+    weeklyOffDays: ['saturday', 'sunday'],
+    workWeekEffectiveFrom: new Date().toISOString().split('T')[0],
     sickLeaveDays: 10,
     emergencyLeaveDays: 5,
     casualLeaveDays: 10,
@@ -443,6 +694,55 @@ function PolicySettingsPanel() {
                   className="mt-1 w-full px-3 py-2 border border-green-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
                 />
               </label>
+            </div>
+          </div>
+
+          <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+            <div className="mb-3">
+              <p className="text-blue-800 font-semibold text-sm">Work Week Settings</p>
+              <p className="text-blue-600 text-xs mt-1">
+                Attendance reminders and absence calculations skip configured weekly off days.
+              </p>
+            </div>
+            <label className="block text-sm text-gray-600 mb-3">
+              Effective From
+              <input
+                type="date"
+                value={policy.workWeekEffectiveFrom}
+                onChange={(event) => setPolicy((value) => ({ ...value, workWeekEffectiveFrom: event.target.value }))}
+                className="mt-1 w-full md:w-64 px-3 py-2 border border-blue-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {WEEK_DAYS.map((day) => {
+                const isOff = policy.weeklyOffDays.includes(day);
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() =>
+                      setPolicy((value) => {
+                        const nextOff = isOff
+                          ? value.weeklyOffDays.filter((item) => item !== day)
+                          : [...value.weeklyOffDays, day];
+                        return {
+                          ...value,
+                          weeklyOffDays: nextOff,
+                          workingDays: WEEK_DAYS.filter((item) => !nextOff.includes(item)),
+                        };
+                      })
+                    }
+                    className={`rounded-xl border px-3 py-2 text-left transition-all ${
+                      isOff
+                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        : 'border-green-200 bg-white text-green-700'
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">{weekdayLabel(day)}</span>
+                    <span className="text-xs">{isOff ? 'Weekly Off' : 'Working Day'}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -647,6 +947,7 @@ export default function UserManagement() {
       </div>
 
       <PolicySettingsPanel />
+      <HolidayManagementPanel />
 
       <div className="my-5 bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <button

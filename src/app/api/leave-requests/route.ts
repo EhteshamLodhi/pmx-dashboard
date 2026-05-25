@@ -374,3 +374,40 @@ export async function PATCH(request: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+export async function DELETE(request: Request) {
+  const authResult = await requireAuthenticatedUser();
+  if (authResult.response || !authResult.user) return authResult.response;
+
+  const url = new URL(request.url);
+  const leaveId = url.searchParams.get('leaveId') ?? String((await request.json().catch(() => ({}))).leaveId ?? '');
+  if (!leaveId) {
+    return NextResponse.json({ error: 'Leave request id is required.' }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const { data: leave, error: leaveError } = await admin
+    .from('leave_requests')
+    .select('id, employee_id, status')
+    .eq('id', leaveId)
+    .maybeSingle();
+
+  if (leaveError || !leave) {
+    return NextResponse.json({ error: 'Leave request was not found.' }, { status: 404 });
+  }
+
+  if (leave.employee_id !== authResult.user.id) {
+    return NextResponse.json({ error: 'You can only delete your own leave requests.' }, { status: 403 });
+  }
+
+  if (!['pending_manager', 'pending_project_manager', 'pending_director'].includes(leave.status)) {
+    return NextResponse.json({ error: 'Only pending leave requests can be deleted.' }, { status: 400 });
+  }
+
+  await admin.from('notifications').delete().ilike('source_key', `%${leaveId}%`);
+
+  const { error } = await admin.from('leave_requests').delete().eq('id', leaveId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  return NextResponse.json({ ok: true });
+}

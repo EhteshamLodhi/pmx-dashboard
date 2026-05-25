@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { tryCreateNotifications, tryCreateRoleNotification } from '@/server/notifications';
+import { holidayForDate, isWeeklyOff } from '@/lib/attendance-calendar';
+import type { Holiday, PolicySettings } from '@/app/types';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -55,6 +57,11 @@ function appendAutoCloseRemark(existing?: string | null) {
   return `${existing}\n${AUTO_CLOSE_REMARK}`;
 }
 
+function closedAttendanceStatus(status?: string | null) {
+  if (status === 'holiday' || status === 'weekly-off' || status === 'on-leave') return status;
+  return status === 'late' ? 'late' : 'present';
+}
+
 function hierarchyRecipients(user: {
   line_manager_id?: string | null;
   project_manager_id?: string | null;
@@ -99,13 +106,16 @@ async function runReminderJob(request: Request) {
 
   const { data: settings, error: settingsError } = await admin
     .from('attendance_settings')
-    .select('check_in_grace_minutes')
+    .select('check_in_grace_minutes, weekly_off_days')
     .limit(1)
     .maybeSingle();
 
   if (settingsError) return reminderResponse({ error: settingsError.message }, 500);
 
   const graceMinutes = settings?.check_in_grace_minutes ?? 15;
+  const policy = {
+    weeklyOffDays: settings?.weekly_off_days ?? ['saturday', 'sunday'],
+  } as PolicySettings;
 
   const { data: users, error: usersError } = await admin
     .from('users')
@@ -113,6 +123,21 @@ async function runReminderJob(request: Request) {
     .eq('is_active', true);
 
   if (usersError) return reminderResponse({ error: usersError.message }, 500);
+
+  const { data: holidays, error: holidaysError } = await admin
+    .from('holidays')
+    .select('id, holiday_name, holiday_date, recurring, holiday_type, description');
+
+  if (holidaysError) return reminderResponse({ error: holidaysError.message }, 500);
+
+  const { data: approvedLeaves, error: approvedLeavesError } = await admin
+    .from('leave_requests')
+    .select('employee_id')
+    .eq('status', 'approved')
+    .lte('start_date', workDate)
+    .gte('end_date', workDate);
+
+  if (approvedLeavesError) return reminderResponse({ error: approvedLeavesError.message }, 500);
 
   const { data: attendance, error: attendanceError } = await admin
     .from('attendance_logs')
@@ -140,7 +165,7 @@ async function runReminderJob(request: Request) {
           .update({
             check_out_at: resolvedCheckoutAt.toISOString(),
             total_hours: Number(totalHours.toFixed(2)),
-            status: record.status === 'late' ? 'late' : 'present',
+            status: closedAttendanceStatus(record.status),
             remarks: appendAutoCloseRemark(record.remarks),
           })
           .eq('id', record.id);
@@ -157,8 +182,22 @@ async function runReminderJob(request: Request) {
       .filter((record) => record.work_date === workDate)
       .map((record) => [record.employee_id, record]),
   );
+  const mappedHolidays = (holidays ?? []).map((holiday) => ({
+    id: holiday.id,
+    name: holiday.holiday_name,
+    date: holiday.holiday_date,
+    recurring: holiday.recurring ?? false,
+    type: holiday.holiday_type ?? 'public',
+    description: holiday.description ?? undefined,
+  })) as Holiday[];
+  const holiday = holidayForDate(mappedHolidays, workDate);
+  const weeklyOff = isWeeklyOff(workDate, policy);
+  const approvedLeaveUserIds = new Set((approvedLeaves ?? []).map((leave) => leave.employee_id));
   const employeeUsers = (users ?? []).filter((user) => user.role !== 'admin');
-  const checkInNotifications = employeeUsers
+  const eligibleReminderUsers = employeeUsers.filter(
+    (user) => !holiday && !weeklyOff && !approvedLeaveUserIds.has(user.id),
+  );
+  const checkInNotifications = eligibleReminderUsers
     .flatMap((user) => {
       const userGraceMinutes = user.check_in_grace_minutes ?? graceMinutes;
       const threshold = minutesFromTime(user.reporting_time ?? '09:00') + userGraceMinutes;
@@ -177,7 +216,7 @@ async function runReminderJob(request: Request) {
       }];
     });
 
-  const managerCheckInNotifications = employeeUsers
+  const managerCheckInNotifications = eligibleReminderUsers
     .flatMap((user) => {
       const userGraceMinutes = user.check_in_grace_minutes ?? graceMinutes;
       const threshold = minutesFromTime(user.reporting_time ?? '09:00') + userGraceMinutes;
@@ -194,7 +233,7 @@ async function runReminderJob(request: Request) {
       }));
     });
 
-  const checkOutNotifications = employeeUsers
+  const checkOutNotifications = eligibleReminderUsers
     .flatMap((user) => {
       const record = attendanceByUser.get(user.id);
       if (!(record?.check_in_at && !record?.check_out_at)) return [];
@@ -213,7 +252,7 @@ async function runReminderJob(request: Request) {
       }];
     });
 
-  const managerCheckOutNotifications = employeeUsers
+  const managerCheckOutNotifications = eligibleReminderUsers
     .flatMap((user) => {
       const record = attendanceByUser.get(user.id);
       if (!(record?.check_in_at && !record?.check_out_at)) return [];
@@ -256,6 +295,10 @@ async function runReminderJob(request: Request) {
     workDate,
     localTime: localNow().toISOString(),
     activeUsers: employeeUsers.length,
+    reminderEligibleUsers: eligibleReminderUsers.length,
+    skippedForHoliday: Boolean(holiday),
+    skippedForWeeklyOff: weeklyOff,
+    approvedLeaveUsers: approvedLeaveUserIds.size,
     openCheckouts: employeeUsers.filter((user) => {
       const record = attendanceByUser.get(user.id);
       return Boolean(record?.check_in_at && !record?.check_out_at);

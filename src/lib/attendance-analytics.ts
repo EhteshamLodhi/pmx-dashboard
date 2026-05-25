@@ -8,6 +8,8 @@ export type ComputedAttendanceStatus =
   | 'Half Day'
   | 'Missing Checkout'
   | 'Absent'
+  | 'Holiday'
+  | 'Weekly Off'
   | 'Leave Approved';
 
 export function minutesFromTime(value?: string | null) {
@@ -55,6 +57,8 @@ export function getDelayMinutes(record?: AttendanceRecord, user?: User, policy?:
 
 export function getComputedAttendanceStatus(record?: AttendanceRecord, user?: User, policy?: PolicySettings | null): ComputedAttendanceStatus {
   if (!record || record.status === 'absent') return 'Absent';
+  if (record.status === 'holiday') return 'Holiday';
+  if (record.status === 'weekly-off') return 'Weekly Off';
   if (record.status === 'on-leave') return 'Leave Approved';
   if (record.checkIn && !record.checkOut) return 'Missing Checkout';
 
@@ -111,6 +115,7 @@ export function getPerformanceScore(records: AttendanceRecord[], user: User, pol
     const status = getComputedAttendanceStatus(record, user, policy);
     const hours = getWorkingHours(record);
 
+    if (status === 'Holiday' || status === 'Weekly Off' || status === 'Leave Approved') return score;
     if (status === 'Absent') return score - 10;
 
     let nextScore = score + (status === 'On Time' ? 10 : -5);

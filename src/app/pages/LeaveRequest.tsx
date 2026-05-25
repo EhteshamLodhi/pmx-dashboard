@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CalendarDays, PlusCircle, Clock, CheckCircle2, XCircle, ChevronRight, Info, Edit3, Save, Loader2 } from 'lucide-react';
+import { CalendarDays, PlusCircle, Clock, CheckCircle2, XCircle, ChevronRight, Info, Edit3, Save, Loader2, Trash2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { LeaveType, LeaveRequest, PolicySettings } from '../types';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
@@ -37,7 +37,7 @@ function getStatusBadge(status: LeaveRequest['status']) {
 }
 
 export default function LeaveRequestPage() {
-  const { currentUser, leaveRequests, submitLeaveRequest } = useApp();
+  const { currentUser, leaveRequests, submitLeaveRequest, deleteLeaveRequest } = useApp();
   const { isPending, runAction } = useActionRunner();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -49,6 +49,8 @@ export default function LeaveRequestPage() {
   const [submitted, setSubmitted] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [requestToDelete, setRequestToDelete] = useState<LeaveRequest | null>(null);
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState(false);
@@ -58,6 +60,9 @@ export default function LeaveRequestPage() {
     globalReportingTime: '09:00',
     globalGracePeriod: 15,
     checkOutReminderTime: '19:00',
+    workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+    weeklyOffDays: ['saturday', 'sunday'],
+    workWeekEffectiveFrom: new Date().toISOString().split('T')[0],
     sickLeaveDays: 10,
     emergencyLeaveDays: 5,
     casualLeaveDays: 10,
@@ -168,6 +173,23 @@ export default function LeaveRequestPage() {
   };
   const submittingLeave = isPending('leave-submit');
   const savingLeavePolicy = savingPolicy || isPending('leave-policy-save');
+  const deletingLeave = requestToDelete ? isPending(`leave-delete:${requestToDelete.id}`) : false;
+
+  const handleDeleteRequest = async () => {
+    if (!requestToDelete) return;
+
+    await runAction(`leave-delete:${requestToDelete.id}`, async () => {
+      setDeleteError(null);
+      await deleteLeaveRequest(requestToDelete.id);
+      setRequestToDelete(null);
+    }, {
+      loading: 'Deleting leave request...',
+      success: 'Leave request deleted.',
+      error: 'Unable to delete leave request.',
+    }).catch((error) => {
+      setDeleteError(error instanceof Error ? error.message : 'Unable to delete leave request.');
+    });
+  };
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto">
@@ -467,6 +489,12 @@ export default function LeaveRequestPage() {
         ))}
       </div>
 
+      {deleteError && (
+        <div className="mb-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
+          {deleteError}
+        </div>
+      )}
+
       {/* My leave history */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -492,6 +520,10 @@ export default function LeaveRequestPage() {
               const badge = getStatusBadge(req.status);
               const StatusIcon = badge.icon;
               const typeColors = getLeaveTypeColor(req.type);
+              const canDeleteRequest =
+                req.status === 'pending_manager' ||
+                req.status === 'pending_project_manager' ||
+                req.status === 'pending_director';
               return (
                 <div key={req.id} className="px-5 py-4 hover:bg-gray-50 transition-colors">
                   <div className="flex items-start justify-between gap-3">
@@ -518,6 +550,15 @@ export default function LeaveRequestPage() {
                         </p>
                       </div>
                     </div>
+                    {canDeleteRequest && (
+                      <button
+                        onClick={() => setRequestToDelete(req)}
+                        className="p-2 rounded-lg text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
+                        title="Delete leave request"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Approval progress */}
@@ -548,6 +589,46 @@ export default function LeaveRequestPage() {
           </div>
         )}
       </div>
+
+      {requestToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl border border-gray-100 shadow-2xl overflow-hidden">
+            <div className="p-5">
+              <div className="w-11 h-11 rounded-xl bg-red-50 flex items-center justify-center mb-4">
+                <Trash2 className="w-5 h-5 text-red-500" />
+              </div>
+              <h3 className="text-gray-900 font-semibold">Delete leave request?</h3>
+              <p className="text-gray-500 mt-2 text-sm">
+                Are you sure you want to delete this leave request?
+              </p>
+              <p className="text-gray-400 mt-2 text-xs">
+                {requestToDelete.startDate} - {requestToDelete.endDate} - {getLeaveTypeLabel(requestToDelete.type)}
+              </p>
+              <div className="mt-5 flex gap-3">
+                <button
+                  onClick={() => setRequestToDelete(null)}
+                  disabled={deletingLeave}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => void handleDeleteRequest()}
+                  disabled={deletingLeave}
+                  className="flex-1 py-2.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {deletingLeave ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Deleting...
+                    </span>
+                  ) : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

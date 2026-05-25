@@ -7,7 +7,7 @@ begin
   end if;
 
   if not exists (select 1 from pg_type where typname = 'attendance_status' and typnamespace = 'public'::regnamespace) then
-    create type public.attendance_status as enum ('present', 'absent', 'late', 'checked-in-only', 'on-leave');
+    create type public.attendance_status as enum ('present', 'absent', 'late', 'checked-in-only', 'half-day', 'on-leave', 'holiday', 'weekly-off');
   end if;
 
   if not exists (select 1 from pg_type where typname = 'leave_type' and typnamespace = 'public'::regnamespace) then
@@ -26,6 +26,9 @@ $$;
 
 alter type public.leave_type add value if not exists 'emergency';
 alter type public.leave_status add value if not exists 'pending_project_manager';
+alter type public.attendance_status add value if not exists 'half-day';
+alter type public.attendance_status add value if not exists 'holiday';
+alter type public.attendance_status add value if not exists 'weekly-off';
 
 create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),
@@ -171,6 +174,18 @@ where endpoint is null or p256dh is null or auth is null;
 alter table public.push_subscriptions alter column p256dh set not null;
 alter table public.push_subscriptions alter column auth set not null;
 
+create table if not exists public.holidays (
+  id uuid primary key default gen_random_uuid(),
+  holiday_name text not null,
+  holiday_date date not null,
+  recurring boolean not null default false,
+  holiday_type text not null default 'public' check (holiday_type in ('public', 'company', 'optional')),
+  description text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint holidays_unique_date_name unique (holiday_date, holiday_name)
+);
+
 create table if not exists public.attendance_settings (
   id uuid primary key default gen_random_uuid(),
   default_reporting_time time not null default '09:00',
@@ -178,6 +193,9 @@ create table if not exists public.attendance_settings (
   global_reporting_time time not null default '09:00',
   global_grace_period integer not null default 15,
   check_out_reminder_time time not null default '19:00',
+  working_days text[] not null default array['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  weekly_off_days text[] not null default array['saturday', 'sunday'],
+  work_week_effective_from date not null default current_date,
   minimum_leave_notice_hours integer not null default 48,
   sick_leave_days integer not null default 10,
   emergency_leave_days integer not null default 5,
@@ -196,6 +214,9 @@ Annual leave is for planned vacations or longer breaks and requires advance noti
 alter table public.attendance_settings add column if not exists default_reporting_time time not null default '09:00';
 alter table public.attendance_settings add column if not exists global_reporting_time time not null default '09:00';
 alter table public.attendance_settings add column if not exists global_grace_period integer not null default 15;
+alter table public.attendance_settings add column if not exists working_days text[] not null default array['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+alter table public.attendance_settings add column if not exists weekly_off_days text[] not null default array['saturday', 'sunday'];
+alter table public.attendance_settings add column if not exists work_week_effective_from date not null default current_date;
 alter table public.attendance_settings add column if not exists minimum_leave_notice_hours integer not null default 48;
 alter table public.attendance_settings add column if not exists sick_leave_days integer not null default 10;
 alter table public.attendance_settings add column if not exists emergency_leave_days integer not null default 5;
@@ -230,6 +251,8 @@ create index if not exists notifications_user_read_idx on public.notifications(u
 create index if not exists notifications_source_key_idx on public.notifications(source_key);
 create index if not exists push_subscriptions_user_idx on public.push_subscriptions(user_id);
 create unique index if not exists push_subscriptions_endpoint_unique_idx on public.push_subscriptions(endpoint);
+create index if not exists holidays_date_idx on public.holidays(holiday_date);
+create index if not exists holidays_recurring_idx on public.holidays(recurring);
 
 create or replace function public.handle_updated_at()
 returns trigger
@@ -307,6 +330,12 @@ before update on public.push_subscriptions
 for each row
 execute function public.handle_updated_at();
 
+drop trigger if exists on_holidays_updated on public.holidays;
+create trigger on_holidays_updated
+before update on public.holidays
+for each row
+execute function public.handle_updated_at();
+
 drop trigger if exists on_attendance_settings_updated on public.attendance_settings;
 create trigger on_attendance_settings_updated
 before update on public.attendance_settings
@@ -327,6 +356,7 @@ alter table public.approval_workflow enable row level security;
 alter table public.audit_logs enable row level security;
 alter table public.notifications enable row level security;
 alter table public.push_subscriptions enable row level security;
+alter table public.holidays enable row level security;
 alter table public.attendance_settings enable row level security;
 
 drop policy if exists "Users can read active org users" on public.users;
@@ -408,6 +438,17 @@ create policy "Users manage own push subscriptions" on public.push_subscriptions
 for all
 using (user_id = auth.uid())
 with check (user_id = auth.uid());
+
+drop policy if exists "Authenticated users read holidays" on public.holidays;
+create policy "Authenticated users read holidays" on public.holidays
+for select
+using (auth.uid() is not null);
+
+drop policy if exists "Admins manage holidays" on public.holidays;
+create policy "Admins manage holidays" on public.holidays
+for all
+using (public.current_user_role() = 'admin')
+with check (public.current_user_role() = 'admin');
 
 drop policy if exists "Admins manage attendance settings" on public.attendance_settings;
 create policy "Admins manage attendance settings" on public.attendance_settings

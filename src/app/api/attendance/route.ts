@@ -4,6 +4,8 @@ import { requireAuthenticatedUser } from '@/server/auth';
 import { requireSupabase } from '@/server/responses';
 import { tryCreateNotification, tryCreateRoleNotification } from '@/server/notifications';
 import { formatDisplayTime } from '@/lib/time';
+import { holidayForDate, isWeeklyOff } from '@/lib/attendance-calendar';
+import type { AttendanceStatus, Holiday, PolicySettings } from '@/app/types';
 
 function localNow() {
   const now = new Date();
@@ -30,6 +32,11 @@ function minutesFromTime(value: string) {
 function attendanceStatus(reportingTime: string, graceMinutes: number, checkInTime: string) {
   const cutoff = minutesFromTime(reportingTime) + graceMinutes;
   return minutesFromTime(checkInTime) > cutoff ? 'late' : 'present';
+}
+
+function preserveNonWorkingStatus(status: string): AttendanceStatus {
+  if (status === 'holiday' || status === 'weekly-off' || status === 'on-leave') return status;
+  return status === 'late' ? 'late' : 'present';
 }
 
 export async function GET() {
@@ -77,8 +84,38 @@ export async function POST(request: Request) {
     if (body.action === 'check-in') {
       if (existing?.check_in_at) return NextResponse.json({ data: existing });
 
+      const [{ data: settings }, { data: holidays }, { data: approvedLeave }] = await Promise.all([
+        admin.from('attendance_settings').select('weekly_off_days').limit(1).maybeSingle(),
+        admin.from('holidays').select('id, holiday_name, holiday_date, recurring, holiday_type, description'),
+        admin
+          .from('leave_requests')
+          .select('id')
+          .eq('employee_id', authResult.user.id)
+          .eq('status', 'approved')
+          .lte('start_date', workDate)
+          .gte('end_date', workDate)
+          .maybeSingle(),
+      ]);
+      const policy = {
+        weeklyOffDays: settings?.weekly_off_days ?? ['saturday', 'sunday'],
+      } as PolicySettings;
+      const mappedHolidays = (holidays ?? []).map((holiday) => ({
+        id: holiday.id,
+        name: holiday.holiday_name,
+        date: holiday.holiday_date,
+        recurring: holiday.recurring ?? false,
+        type: holiday.holiday_type ?? 'public',
+        description: holiday.description ?? undefined,
+      })) as Holiday[];
+      const nonWorkingStatus: AttendanceStatus | null = holidayForDate(mappedHolidays, workDate)
+        ? 'holiday'
+        : isWeeklyOff(workDate, policy)
+          ? 'weekly-off'
+          : approvedLeave
+            ? 'on-leave'
+            : null;
       const reportingTime = appUser.reporting_time ?? '09:00';
-      const status = attendanceStatus(reportingTime, appUser.check_in_grace_minutes ?? 15, localTime());
+      const status = nonWorkingStatus ?? attendanceStatus(reportingTime, appUser.check_in_grace_minutes ?? 15, localTime());
       const payload = {
         employee_id: authResult.user.id,
         work_date: workDate,
@@ -127,7 +164,7 @@ export async function POST(request: Request) {
       .update({
         check_out_at: now.toISOString(),
         total_hours: Number(totalHours.toFixed(2)),
-        status: existing.status === 'late' ? 'late' : 'present',
+        status: preserveNonWorkingStatus(existing.status),
       })
       .eq('id', existing.id)
       .select()

@@ -15,6 +15,7 @@ import {
   getWorkingHours,
   type AttendanceRangeKey,
 } from '@/lib/attendance-analytics';
+import { getNonWorkingStatus, nonWorkingLabel } from '@/lib/attendance-calendar';
 
 const TODAY = new Date().toISOString().split('T')[0];
 const TODAY_LABEL = new Date().toLocaleDateString('en-US', {
@@ -38,6 +39,10 @@ function getStatusBadge(status: AttendanceRecord['status']) {
       return { label: 'On Leave', cls: 'bg-blue-100 text-blue-700' };
     case 'half-day':
       return { label: 'Half Day', cls: 'bg-purple-100 text-purple-700' };
+    case 'holiday':
+      return { label: 'Holiday', cls: 'bg-sky-100 text-sky-700' };
+    case 'weekly-off':
+      return { label: 'Weekly Off', cls: 'bg-gray-100 text-gray-600' };
     default:
       return { label: 'Not Recorded', cls: 'bg-gray-100 text-gray-500' };
   }
@@ -81,7 +86,7 @@ function LiveClock() {
 }
 
 export default function Attendance() {
-  const { currentUser, checkIn, checkOut, getTodayRecord, getAttendanceForUser } = useApp();
+  const { currentUser, holidays, leaveRequests, checkIn, checkOut, getTodayRecord, getAttendanceForUser } = useApp();
   const { isPending, runAction } = useActionRunner();
   const [justCheckedIn, setJustCheckedIn] = useState(false);
   const [justCheckedOut, setJustCheckedOut] = useState(false);
@@ -92,6 +97,9 @@ export default function Attendance() {
   const [policy, setPolicy] = useState<PolicySettings | null>(null);
 
   const todayRecord = getTodayRecord();
+  const todayNonWorkingStatus = currentUser
+    ? getNonWorkingStatus({ date: TODAY, userId: currentUser.id, holidays, policy, leaveRequests })
+    : null;
   const allRecords = useMemo(
     () => [...getAttendanceForUser(currentUser?.id ?? '')].sort((a, b) => b.date.localeCompare(a.date)),
     [currentUser?.id, getAttendanceForUser],
@@ -122,9 +130,12 @@ export default function Attendance() {
       averageArrival: averageTime(filteredRecords.filter((record) => record.checkIn), 'checkIn'),
       averageDeparture: averageTime(filteredRecords.filter((record) => record.checkOut), 'checkOut'),
       totalWorkingHours,
-      totalPresentDays: filteredRecords.filter((record) => record.status === 'present' || record.status === 'late' || record.status === 'checked-in-only').length,
+      totalPresentDays: filteredRecords.filter((record) => {
+        const status = getComputedAttendanceStatus(record, currentUser ?? undefined, policy);
+        return status !== 'Absent' && status !== 'Holiday' && status !== 'Weekly Off' && status !== 'Leave Approved';
+      }).length,
       totalLateDays,
-      totalAbsentDays: filteredRecords.filter((record) => record.status === 'absent' || !record.checkIn).length,
+      totalAbsentDays: filteredRecords.filter((record) => getComputedAttendanceStatus(record, currentUser ?? undefined, policy) === 'Absent').length,
     };
   }, [currentUser, filteredRecords, policy]);
 
@@ -238,6 +249,12 @@ export default function Attendance() {
       {actionError && (
         <div className="mb-6 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
           {actionError}
+        </div>
+      )}
+
+      {todayNonWorkingStatus && !todayRecord && (
+        <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          Today is marked as {nonWorkingLabel(todayNonWorkingStatus)}. Attendance reminders and absence calculations are skipped.
         </div>
       )}
 
