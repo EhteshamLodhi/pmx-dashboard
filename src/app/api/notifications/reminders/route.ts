@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { tryCreateNotifications, tryCreateRoleNotification } from '@/server/notifications';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const CHECKOUT_REMINDER_AFTER_HOURS = 9;
 const AUTO_CLOSE_REMARK = 'Auto-closed by reminder engine after missing check-out.';
 
@@ -23,6 +26,10 @@ function localNow() {
 function currentMinutes() {
   const now = localNow();
   return now.getHours() * 60 + now.getMinutes();
+}
+
+function reminderRoundByMinutes(nowMinutes: number, thresholdMinutes: number) {
+  return Math.max(0, Math.floor((nowMinutes - thresholdMinutes) / 60));
 }
 
 function reminderRoundByTimestamp(currentTimestamp: number, thresholdTimestamp: number) {
@@ -58,12 +65,31 @@ function hierarchyRecipients(user: {
   );
 }
 
-export async function GET(request: Request) {
+function reminderResponse(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    },
+  });
+}
+
+function providedCronSecret(request: Request) {
+  const url = new URL(request.url);
+  return (
+    request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ??
+    request.headers.get('x-cron-secret') ??
+    url.searchParams.get('secret')
+  );
+}
+
+async function runReminderJob(request: Request) {
   const secret = process.env.CRON_SECRET;
-  const providedSecret = request.headers.get('authorization')?.replace('Bearer ', '');
+  const providedSecret = providedCronSecret(request);
 
   if (secret && providedSecret !== secret) {
-    return NextResponse.json({ error: 'Unauthorized reminder run.' }, { status: 401 });
+    console.warn('Reminder run rejected: invalid cron secret.');
+    return reminderResponse({ error: 'Unauthorized reminder run.' }, 401);
   }
 
   const admin = createAdminClient();
@@ -77,7 +103,7 @@ export async function GET(request: Request) {
     .limit(1)
     .maybeSingle();
 
-  if (settingsError) return NextResponse.json({ error: settingsError.message }, { status: 500 });
+  if (settingsError) return reminderResponse({ error: settingsError.message }, 500);
 
   const graceMinutes = settings?.check_in_grace_minutes ?? 15;
 
@@ -86,13 +112,13 @@ export async function GET(request: Request) {
     .select('id, full_name, reporting_time, check_in_grace_minutes, line_manager_id, project_manager_id, director_id, role, is_active')
     .eq('is_active', true);
 
-  if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 });
+  if (usersError) return reminderResponse({ error: usersError.message }, 500);
 
   const { data: attendance, error: attendanceError } = await admin
     .from('attendance_logs')
     .select('id, employee_id, work_date, check_in_at, check_out_at, status, remarks');
 
-  if (attendanceError) return NextResponse.json({ error: attendanceError.message }, { status: 500 });
+  if (attendanceError) return reminderResponse({ error: attendanceError.message }, 500);
 
   const allAttendance = attendance ?? [];
   const staleOpenAttendance = allAttendance.filter((record) =>
@@ -133,20 +159,23 @@ export async function GET(request: Request) {
   );
   const employeeUsers = (users ?? []).filter((user) => user.role !== 'admin');
   const checkInNotifications = employeeUsers
-    .filter((user) => {
+    .flatMap((user) => {
       const userGraceMinutes = user.check_in_grace_minutes ?? graceMinutes;
       const threshold = minutesFromTime(user.reporting_time ?? '09:00') + userGraceMinutes;
       const record = attendanceByUser.get(user.id);
-      return nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave';
-    })
-    .map((user) => ({
-      userId: user.id,
-      category: 'attendance' as const,
-      title: 'Check-in reminder',
-      message: 'You have not checked in today.',
-      link: '/attendance',
-      sourceKey: `check-in:${workDate}:${user.id}`,
-    }));
+      if (!(nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave')) return [];
+      const round = reminderRoundByMinutes(nowMinutes, threshold);
+      return [{
+        userId: user.id,
+        category: 'attendance' as const,
+        title: round === 0 ? 'Check-in reminder' : 'Hourly check-in reminder',
+        message: round === 0
+          ? 'You have not checked in today.'
+          : 'You still have not checked in today. Please mark your attendance.',
+        link: '/attendance',
+        sourceKey: `check-in:${workDate}:${user.id}:${round}`,
+      }];
+    });
 
   const managerCheckInNotifications = employeeUsers
     .flatMap((user) => {
@@ -154,13 +183,14 @@ export async function GET(request: Request) {
       const threshold = minutesFromTime(user.reporting_time ?? '09:00') + userGraceMinutes;
       const record = attendanceByUser.get(user.id);
       if (!(nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave')) return [];
+      const round = reminderRoundByMinutes(nowMinutes, threshold);
       return hierarchyRecipients(user).map((recipientId) => ({
         userId: recipientId,
         category: 'attendance' as const,
-        title: 'Employee check-in reminder',
+        title: round === 0 ? 'Employee check-in reminder' : 'Employee hourly check-in reminder',
         message: `${user.full_name} has not checked in today.`,
         link: '/admin/attendance',
-        sourceKey: `manager-check-in-reminder:${workDate}:${user.id}:${recipientId}`,
+        sourceKey: `manager-check-in-reminder:${workDate}:${user.id}:${recipientId}:${round}`,
       }));
     });
 
@@ -208,21 +238,44 @@ export async function GET(request: Request) {
   ]);
 
   if (checkInNotifications.length > 0) {
+    const adminRound = Math.max(
+      0,
+      ...checkInNotifications.map((notification) => Number(notification.sourceKey?.split(':').at(-1) ?? 0)),
+    );
     await tryCreateRoleNotification(admin, ['admin'], {
       category: 'admin',
       title: 'Missing attendance alert',
       message: `${checkInNotifications.length} employee(s) have not checked in today.`,
       link: '/admin/attendance',
-      sourceKey: `admin-missing-attendance:${workDate}`,
+      sourceKey: `admin-missing-attendance:${workDate}:${adminRound}`,
     });
   }
 
-  return NextResponse.json({
+  const result = {
     ok: true,
+    workDate,
+    localTime: localNow().toISOString(),
+    activeUsers: employeeUsers.length,
+    openCheckouts: employeeUsers.filter((user) => {
+      const record = attendanceByUser.get(user.id);
+      return Boolean(record?.check_in_at && !record?.check_out_at);
+    }).length,
     checkInReminders: checkInNotifications.length,
     checkOutReminders: checkOutNotifications.length,
     managerCheckInReminders: managerCheckInNotifications.length,
     managerCheckOutReminders: managerCheckOutNotifications.length,
     autoClosedCount,
-  });
+  };
+
+  console.info('Reminder run completed', result);
+
+  return reminderResponse(result);
+}
+
+export async function GET(request: Request) {
+  return runReminderJob(request);
+}
+
+export async function POST(request: Request) {
+  return runReminderJob(request);
 }
