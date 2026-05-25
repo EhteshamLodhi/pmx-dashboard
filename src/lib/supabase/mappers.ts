@@ -55,6 +55,8 @@ type DbHolidayRow = {
   id: string;
   holiday_name: string;
   holiday_date: string;
+  start_date?: string | null;
+  end_date?: string | null;
   recurring?: boolean | null;
   holiday_type?: HolidayType | null;
   description?: string | null;
@@ -157,10 +159,15 @@ export function mapAttendanceRecord(row: DbAttendanceRow): AttendanceRecord {
 }
 
 export function mapHoliday(row: DbHolidayRow): Holiday {
+  const startDate = row.start_date ?? row.holiday_date;
+  const endDate = row.end_date ?? row.start_date ?? row.holiday_date;
+
   return {
     id: row.id,
     name: row.holiday_name,
     date: row.holiday_date,
+    startDate,
+    endDate,
     recurring: row.recurring ?? false,
     type: row.holiday_type ?? 'public',
     description: row.description ?? undefined,

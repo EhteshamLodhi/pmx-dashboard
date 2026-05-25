@@ -126,7 +126,7 @@ async function runReminderJob(request: Request) {
 
   const { data: holidays, error: holidaysError } = await admin
     .from('holidays')
-    .select('id, holiday_name, holiday_date, recurring, holiday_type, description');
+    .select('id, holiday_name, holiday_date, start_date, end_date, recurring, holiday_type, description');
 
   if (holidaysError) return reminderResponse({ error: holidaysError.message }, 500);
 
@@ -186,6 +186,8 @@ async function runReminderJob(request: Request) {
     id: holiday.id,
     name: holiday.holiday_name,
     date: holiday.holiday_date,
+    startDate: holiday.start_date ?? holiday.holiday_date,
+    endDate: holiday.end_date ?? holiday.start_date ?? holiday.holiday_date,
     recurring: holiday.recurring ?? false,
     type: holiday.holiday_type ?? 'public',
     description: holiday.description ?? undefined,

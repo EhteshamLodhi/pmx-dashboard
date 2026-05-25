@@ -51,6 +51,8 @@ export interface Holiday {
   id: string;
   name: string;
   date: string;
+  startDate: string;
+  endDate: string;
   recurring: boolean;
   type: HolidayType;
   description?: string;

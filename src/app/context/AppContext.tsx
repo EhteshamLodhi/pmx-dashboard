@@ -211,7 +211,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           supabase
             .from('holidays')
             .select('*')
-            .order('holiday_date', { ascending: true }),
+            .order('start_date', { ascending: true }),
           supabase
             .from('notifications')
             .select('*')

@@ -178,13 +178,34 @@ create table if not exists public.holidays (
   id uuid primary key default gen_random_uuid(),
   holiday_name text not null,
   holiday_date date not null,
+  start_date date not null default current_date,
+  end_date date not null default current_date,
   recurring boolean not null default false,
   holiday_type text not null default 'public' check (holiday_type in ('public', 'company', 'optional')),
   description text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint holidays_valid_range check (end_date >= start_date),
   constraint holidays_unique_date_name unique (holiday_date, holiday_name)
 );
+
+alter table public.holidays add column if not exists start_date date;
+alter table public.holidays add column if not exists end_date date;
+
+update public.holidays
+set
+  start_date = coalesce(start_date, holiday_date),
+  end_date = coalesce(end_date, start_date, holiday_date)
+where start_date is null or end_date is null;
+
+alter table public.holidays alter column start_date set default current_date;
+alter table public.holidays alter column end_date set default current_date;
+alter table public.holidays alter column start_date set not null;
+alter table public.holidays alter column end_date set not null;
+
+alter table public.holidays drop constraint if exists holidays_valid_range;
+alter table public.holidays
+  add constraint holidays_valid_range check (end_date >= start_date);
 
 create table if not exists public.attendance_settings (
   id uuid primary key default gen_random_uuid(),
@@ -252,6 +273,7 @@ create index if not exists notifications_source_key_idx on public.notifications(
 create index if not exists push_subscriptions_user_idx on public.push_subscriptions(user_id);
 create unique index if not exists push_subscriptions_endpoint_unique_idx on public.push_subscriptions(endpoint);
 create index if not exists holidays_date_idx on public.holidays(holiday_date);
+create index if not exists holidays_range_idx on public.holidays(start_date, end_date);
 create index if not exists holidays_recurring_idx on public.holidays(recurring);
 
 create or replace function public.handle_updated_at()

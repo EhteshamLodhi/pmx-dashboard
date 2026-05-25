@@ -86,7 +86,7 @@ export async function POST(request: Request) {
 
       const [{ data: settings }, { data: holidays }, { data: approvedLeave }] = await Promise.all([
         admin.from('attendance_settings').select('weekly_off_days').limit(1).maybeSingle(),
-        admin.from('holidays').select('id, holiday_name, holiday_date, recurring, holiday_type, description'),
+        admin.from('holidays').select('id, holiday_name, holiday_date, start_date, end_date, recurring, holiday_type, description'),
         admin
           .from('leave_requests')
           .select('id')
@@ -103,6 +103,8 @@ export async function POST(request: Request) {
         id: holiday.id,
         name: holiday.holiday_name,
         date: holiday.holiday_date,
+        startDate: holiday.start_date ?? holiday.holiday_date,
+        endDate: holiday.end_date ?? holiday.start_date ?? holiday.holiday_date,
         recurring: holiday.recurring ?? false,
         type: holiday.holiday_type ?? 'public',
         description: holiday.description ?? undefined,

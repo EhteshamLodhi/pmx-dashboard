@@ -359,7 +359,8 @@ function HolidayManagementPanel() {
   const [localHolidays, setLocalHolidays] = useState<Holiday[]>(holidays);
   const [form, setForm] = useState({
     name: '',
-    date: '',
+    startDate: '',
+    endDate: '',
     type: 'public' as HolidayType,
     recurring: false,
     description: '',
@@ -371,14 +372,15 @@ function HolidayManagementPanel() {
 
   const resetForm = () => {
     setEditing(null);
-    setForm({ name: '', date: '', type: 'public', recurring: false, description: '' });
+    setForm({ name: '', startDate: '', endDate: '', type: 'public', recurring: false, description: '' });
   };
 
   const beginEdit = (holiday: Holiday) => {
     setEditing(holiday);
     setForm({
       name: holiday.name,
-      date: holiday.date,
+      startDate: holiday.startDate,
+      endDate: holiday.endDate,
       type: holiday.type,
       recurring: holiday.recurring,
       description: holiday.description ?? '',
@@ -409,7 +411,7 @@ function HolidayManagementPanel() {
         setLocalHolidays((items) =>
           editing
             ? items.map((item) => (item.id === savedHoliday.id ? savedHoliday : item))
-            : [...items, savedHoliday].sort((a, b) => a.date.localeCompare(b.date)),
+            : [...items, savedHoliday].sort((a, b) => a.startDate.localeCompare(b.startDate)),
         );
       }
 
@@ -483,15 +485,6 @@ function HolidayManagementPanel() {
               />
             </label>
             <label className="text-sm text-gray-600">
-              Holiday Date
-              <input
-                type="date"
-                value={form.date}
-                onChange={(event) => setForm((value) => ({ ...value, date: event.target.value }))}
-                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
-              />
-            </label>
-            <label className="text-sm text-gray-600">
               Holiday Type
               <select
                 value={form.type}
@@ -503,6 +496,37 @@ function HolidayManagementPanel() {
                 <option value="optional">Optional Holiday</option>
               </select>
             </label>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="text-sm text-gray-600">
+              Start Date
+              <input
+                type="date"
+                value={form.startDate}
+                onChange={(event) =>
+                  setForm((value) => ({
+                    ...value,
+                    startDate: event.target.value,
+                    endDate: value.endDate && value.endDate < event.target.value ? event.target.value : value.endDate,
+                  }))
+                }
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+            <label className="text-sm text-gray-600">
+              End Date
+              <input
+                type="date"
+                min={form.startDate || undefined}
+                value={form.endDate}
+                onChange={(event) => setForm((value) => ({ ...value, endDate: event.target.value }))}
+                className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="text-sm text-gray-600">
               Description
               <input
@@ -536,7 +560,7 @@ function HolidayManagementPanel() {
             )}
             <button
               onClick={() => void saveHoliday()}
-              disabled={savingHoliday || !form.name.trim() || !form.date}
+              disabled={savingHoliday || !form.name.trim() || !form.startDate || !form.endDate}
               className="flex-1 py-2.5 rounded-xl bg-green-600 text-white hover:bg-green-700 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {savingHoliday ? (
@@ -560,7 +584,7 @@ function HolidayManagementPanel() {
                 <div className="min-w-0">
                   <p className="text-gray-900 font-semibold text-sm">{holiday.name}</p>
                   <p className="text-gray-500 text-xs">
-                    {holiday.date} - {getHolidayTypeLabel(holiday.type)}{holiday.recurring ? ' - recurring' : ''}
+                    {holiday.startDate === holiday.endDate ? holiday.startDate : `${holiday.startDate} to ${holiday.endDate}`} - {getHolidayTypeLabel(holiday.type)}{holiday.recurring ? ' - recurring' : ''}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
@@ -704,13 +728,13 @@ function PolicySettingsPanel() {
                 Attendance reminders and absence calculations skip configured weekly off days.
               </p>
             </div>
-            <label className="block text-sm text-gray-600 mb-3">
-              Effective From
+            <label className="grid grid-cols-1 sm:grid-cols-[8rem_1fr] sm:items-center gap-1 sm:gap-3 text-sm text-gray-600 mb-4 max-w-md">
+              <span className="font-medium">Effective From</span>
               <input
                 type="date"
                 value={policy.workWeekEffectiveFrom}
                 onChange={(event) => setPolicy((value) => ({ ...value, workWeekEffectiveFrom: event.target.value }))}
-                className="mt-1 w-full md:w-64 px-3 py-2 border border-blue-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
+                className="w-full px-3 py-2 border border-blue-200 rounded-xl bg-white text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
               />
             </label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">

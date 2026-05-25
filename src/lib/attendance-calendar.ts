@@ -50,7 +50,19 @@ export function dayNameForDate(date: string): WeekDay {
 
 export function holidayForDate(holidays: Holiday[], date: string) {
   const monthDay = date.slice(5);
-  return holidays.find((holiday) => holiday.date === date || (holiday.recurring && holiday.date.slice(5) === monthDay));
+  return holidays.find((holiday) => {
+    const startDate = holiday.startDate ?? holiday.date;
+    const endDate = holiday.endDate ?? startDate;
+    if (date >= startDate && date <= endDate) return true;
+
+    if (!holiday.recurring) return false;
+
+    const startMonthDay = startDate.slice(5);
+    const endMonthDay = endDate.slice(5);
+    if (startMonthDay <= endMonthDay) return monthDay >= startMonthDay && monthDay <= endMonthDay;
+
+    return monthDay >= startMonthDay || monthDay <= endMonthDay;
+  });
 }
 
 export function isWeeklyOff(date: string, policy?: PolicySettings | null) {
