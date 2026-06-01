@@ -21,6 +21,14 @@ begin
   if not exists (select 1 from pg_type where typname = 'approval_status' and typnamespace = 'public'::regnamespace) then
     create type public.approval_status as enum ('pending', 'approved', 'rejected');
   end if;
+
+  if not exists (select 1 from pg_type where typname = 'reimbursement_status' and typnamespace = 'public'::regnamespace) then
+    create type public.reimbursement_status as enum ('draft', 'submitted', 'pending_manager', 'pending_director', 'approved', 'rejected', 'paid', 'cancelled', 'more_info');
+  end if;
+
+  if not exists (select 1 from pg_type where typname = 'reimbursement_approval_status' and typnamespace = 'public'::regnamespace) then
+    create type public.reimbursement_approval_status as enum ('pending', 'approved', 'rejected', 'more_info');
+  end if;
 end
 $$;
 
@@ -29,6 +37,8 @@ alter type public.leave_status add value if not exists 'pending_project_manager'
 alter type public.attendance_status add value if not exists 'half-day';
 alter type public.attendance_status add value if not exists 'holiday';
 alter type public.attendance_status add value if not exists 'weekly-off';
+alter type public.reimbursement_status add value if not exists 'more_info';
+alter type public.reimbursement_approval_status add value if not exists 'more_info';
 
 create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),
@@ -138,7 +148,7 @@ create table if not exists public.audit_logs (
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
-  category text not null check (category in ('attendance', 'leave', 'approval', 'admin')),
+  category text not null check (category in ('attendance', 'leave', 'approval', 'admin', 'reimbursement')),
   title text not null,
   message text not null,
   link text,
@@ -146,6 +156,10 @@ create table if not exists public.notifications (
   is_read boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table public.notifications drop constraint if exists notifications_category_check;
+alter table public.notifications
+  add constraint notifications_category_check check (category in ('attendance', 'leave', 'approval', 'admin', 'reimbursement'));
 
 create table if not exists public.push_subscriptions (
   id uuid primary key default gen_random_uuid(),
@@ -232,6 +246,107 @@ Annual leave is for planned vacations or longer breaks and requires advance noti
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.reimbursement_categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.reimbursement_requests (
+  id uuid primary key default gen_random_uuid(),
+  request_number text not null unique default ('RB-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8))),
+  employee_id uuid not null references public.users(id) on delete cascade,
+  category_id uuid references public.reimbursement_categories(id) on delete set null,
+  expense_date date not null,
+  amount numeric(12, 2) not null check (amount > 0),
+  currency text not null default 'PKR',
+  project text,
+  vendor_name text,
+  receipt_number text,
+  description text not null,
+  status public.reimbursement_status not null default 'submitted',
+  submitted_at timestamptz,
+  decided_at timestamptz,
+  created_by uuid references public.users(id) on delete set null,
+  updated_by uuid references public.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.reimbursement_attachments (
+  id uuid primary key default gen_random_uuid(),
+  reimbursement_id uuid not null references public.reimbursement_requests(id) on delete cascade,
+  file_name text not null,
+  file_type text not null,
+  file_size integer not null default 0,
+  file_path text not null,
+  public_url text,
+  uploaded_by uuid references public.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  constraint reimbursement_attachment_type_check check (lower(file_type) in ('application/pdf', 'image/jpeg', 'image/jpg', 'image/png'))
+);
+
+create table if not exists public.reimbursement_approvals (
+  id uuid primary key default gen_random_uuid(),
+  reimbursement_id uuid not null references public.reimbursement_requests(id) on delete cascade,
+  approval_level integer not null check (approval_level in (1, 2, 3)),
+  approver_id uuid not null references public.users(id) on delete restrict,
+  approver_role text not null,
+  status public.reimbursement_approval_status not null default 'pending',
+  comment text,
+  acted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint reimbursement_approvals_request_level_key unique (reimbursement_id, approval_level)
+);
+
+create table if not exists public.reimbursement_payments (
+  id uuid primary key default gen_random_uuid(),
+  reimbursement_id uuid not null unique references public.reimbursement_requests(id) on delete cascade,
+  payment_date date not null,
+  payment_method text not null check (payment_method in ('bank_transfer', 'cash', 'cheque', 'other')),
+  payment_reference text,
+  remarks text,
+  processed_by uuid references public.users(id) on delete set null,
+  processed_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.reimbursement_comments (
+  id uuid primary key default gen_random_uuid(),
+  reimbursement_id uuid not null references public.reimbursement_requests(id) on delete cascade,
+  actor_id uuid references public.users(id) on delete set null,
+  comment text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.reimbursement_audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  reimbursement_id uuid references public.reimbursement_requests(id) on delete cascade,
+  actor_id uuid references public.users(id) on delete set null,
+  action text not null,
+  before_state jsonb,
+  after_state jsonb,
+  created_at timestamptz not null default now()
+);
+
+insert into public.reimbursement_categories (name)
+values
+  ('Transportation'),
+  ('Fuel'),
+  ('Dinner'),
+  ('Lunch'),
+  ('Hotel'),
+  ('Mobile'),
+  ('Internet'),
+  ('Client Entertainment'),
+  ('Office Supplies'),
+  ('Project Expense'),
+  ('Miscellaneous')
+on conflict (name) do nothing;
+
 alter table public.attendance_settings add column if not exists default_reporting_time time not null default '09:00';
 alter table public.attendance_settings add column if not exists global_reporting_time time not null default '09:00';
 alter table public.attendance_settings add column if not exists global_grace_period integer not null default 15;
@@ -275,6 +390,10 @@ create unique index if not exists push_subscriptions_endpoint_unique_idx on publ
 create index if not exists holidays_date_idx on public.holidays(holiday_date);
 create index if not exists holidays_range_idx on public.holidays(start_date, end_date);
 create index if not exists holidays_recurring_idx on public.holidays(recurring);
+create index if not exists reimbursement_requests_employee_idx on public.reimbursement_requests(employee_id, created_at desc);
+create index if not exists reimbursement_requests_status_idx on public.reimbursement_requests(status, created_at desc);
+create index if not exists reimbursement_approvals_approver_idx on public.reimbursement_approvals(approver_id, status);
+create index if not exists reimbursement_attachments_request_idx on public.reimbursement_attachments(reimbursement_id);
 
 create or replace function public.handle_updated_at()
 returns trigger
@@ -364,6 +483,24 @@ before update on public.attendance_settings
 for each row
 execute function public.handle_updated_at();
 
+drop trigger if exists on_reimbursement_categories_updated on public.reimbursement_categories;
+create trigger on_reimbursement_categories_updated
+before update on public.reimbursement_categories
+for each row
+execute function public.handle_updated_at();
+
+drop trigger if exists on_reimbursement_requests_updated on public.reimbursement_requests;
+create trigger on_reimbursement_requests_updated
+before update on public.reimbursement_requests
+for each row
+execute function public.handle_updated_at();
+
+drop trigger if exists on_reimbursement_approvals_updated on public.reimbursement_approvals;
+create trigger on_reimbursement_approvals_updated
+before update on public.reimbursement_approvals
+for each row
+execute function public.handle_updated_at();
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
@@ -380,6 +517,13 @@ alter table public.notifications enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.holidays enable row level security;
 alter table public.attendance_settings enable row level security;
+alter table public.reimbursement_categories enable row level security;
+alter table public.reimbursement_requests enable row level security;
+alter table public.reimbursement_attachments enable row level security;
+alter table public.reimbursement_approvals enable row level security;
+alter table public.reimbursement_payments enable row level security;
+alter table public.reimbursement_comments enable row level security;
+alter table public.reimbursement_audit_logs enable row level security;
 
 drop policy if exists "Users can read active org users" on public.users;
 create policy "Users can read active org users" on public.users
@@ -477,3 +621,79 @@ create policy "Admins manage attendance settings" on public.attendance_settings
 for all
 using (public.current_user_role() in ('admin', 'director'))
 with check (public.current_user_role() in ('admin', 'director'));
+
+drop policy if exists "Authenticated users read reimbursement categories" on public.reimbursement_categories;
+create policy "Authenticated users read reimbursement categories" on public.reimbursement_categories
+for select
+using (auth.uid() is not null);
+
+drop policy if exists "Admins manage reimbursement categories" on public.reimbursement_categories;
+create policy "Admins manage reimbursement categories" on public.reimbursement_categories
+for all
+using (public.current_user_role() = 'admin')
+with check (public.current_user_role() = 'admin');
+
+drop policy if exists "Users read reimbursement requests" on public.reimbursement_requests;
+create policy "Users read reimbursement requests" on public.reimbursement_requests
+for select
+using (employee_id = auth.uid() or public.current_user_role() in ('manager', 'director', 'admin'));
+
+drop policy if exists "Employees submit reimbursements" on public.reimbursement_requests;
+create policy "Employees submit reimbursements" on public.reimbursement_requests
+for insert
+with check (employee_id = auth.uid());
+
+drop policy if exists "Employees update eligible reimbursements" on public.reimbursement_requests;
+create policy "Employees update eligible reimbursements" on public.reimbursement_requests
+for update
+using (employee_id = auth.uid() or public.current_user_role() = 'admin')
+with check (employee_id = auth.uid() or public.current_user_role() = 'admin');
+
+drop policy if exists "Users read reimbursement attachments" on public.reimbursement_attachments;
+create policy "Users read reimbursement attachments" on public.reimbursement_attachments
+for select
+using (
+  exists (
+    select 1 from public.reimbursement_requests r
+    where r.id = reimbursement_id
+      and (r.employee_id = auth.uid() or public.current_user_role() in ('manager', 'director', 'admin'))
+  )
+);
+
+drop policy if exists "Users insert reimbursement attachments" on public.reimbursement_attachments;
+create policy "Users insert reimbursement attachments" on public.reimbursement_attachments
+for insert
+with check (uploaded_by = auth.uid() or public.current_user_role() = 'admin');
+
+drop policy if exists "Approvers read reimbursement workflow" on public.reimbursement_approvals;
+create policy "Approvers read reimbursement workflow" on public.reimbursement_approvals
+for select
+using (approver_id = auth.uid() or public.current_user_role() in ('admin', 'director'));
+
+drop policy if exists "Approvers update reimbursement workflow" on public.reimbursement_approvals;
+create policy "Approvers update reimbursement workflow" on public.reimbursement_approvals
+for update
+using (approver_id = auth.uid() or public.current_user_role() = 'admin')
+with check (approver_id = auth.uid() or public.current_user_role() = 'admin');
+
+drop policy if exists "Admins manage reimbursement payments" on public.reimbursement_payments;
+create policy "Admins manage reimbursement payments" on public.reimbursement_payments
+for all
+using (public.current_user_role() = 'admin')
+with check (public.current_user_role() = 'admin');
+
+drop policy if exists "Users read reimbursement comments" on public.reimbursement_comments;
+create policy "Users read reimbursement comments" on public.reimbursement_comments
+for select
+using (
+  exists (
+    select 1 from public.reimbursement_requests r
+    where r.id = reimbursement_id
+      and (r.employee_id = auth.uid() or public.current_user_role() in ('manager', 'director', 'admin'))
+  )
+);
+
+drop policy if exists "Admins read reimbursement audit logs" on public.reimbursement_audit_logs;
+create policy "Admins read reimbursement audit logs" on public.reimbursement_audit_logs
+for select
+using (public.current_user_role() = 'admin');

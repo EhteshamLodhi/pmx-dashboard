@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Shield,
   Loader2,
+  ReceiptText,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { NotificationCenter } from './NotificationCenter';
@@ -35,6 +36,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/attendance', label: 'Attendance', icon: Clock },
   { path: '/leave', label: 'Leave Request', icon: CalendarDays },
+  { path: '/reimbursements', label: 'Reimbursements', icon: ReceiptText },
   { path: '/approvals', label: 'Approvals', icon: ClipboardCheck },
 ];
 
@@ -47,6 +49,7 @@ const BOTTOM_NAV: NavItem[] = [
   { path: '/dashboard', label: 'Home', icon: LayoutDashboard },
   { path: '/attendance', label: 'Punch', icon: Clock },
   { path: '/leave', label: 'Leave', icon: CalendarDays },
+  { path: '/reimbursements', label: 'Claims', icon: ReceiptText },
   { path: '/approvals', label: 'Approvals', icon: ClipboardCheck },
   { path: '/profile', label: 'Profile', icon: UserCircle },
 ];

@@ -86,7 +86,75 @@ export interface LeaveRequest {
   approvals: LeaveApproval[];
 }
 
-export type NotificationCategory = 'attendance' | 'leave' | 'approval' | 'admin';
+export type ReimbursementStatus =
+  | 'draft'
+  | 'submitted'
+  | 'pending_manager'
+  | 'pending_director'
+  | 'approved'
+  | 'rejected'
+  | 'paid'
+  | 'cancelled'
+  | 'more_info';
+
+export interface ReimbursementCategory {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface ReimbursementAttachment {
+  id: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  url: string;
+  createdAt: string;
+}
+
+export interface ReimbursementApproval {
+  level: 1 | 2 | 3;
+  approverId: string;
+  approverName: string;
+  role: string;
+  status: 'pending' | 'approved' | 'rejected' | 'more_info';
+  timestamp?: string;
+  comment?: string;
+}
+
+export interface ReimbursementPayment {
+  paymentDate?: string;
+  paymentMethod?: 'bank_transfer' | 'cash' | 'cheque' | 'other';
+  referenceNumber?: string;
+  remarks?: string;
+  processedBy?: string;
+  processedAt?: string;
+}
+
+export interface ReimbursementRequest {
+  id: string;
+  requestNumber: string;
+  userId: string;
+  userName: string;
+  userProject: string;
+  categoryId?: string;
+  categoryName: string;
+  expenseDate: string;
+  amount: number;
+  currency: string;
+  project?: string;
+  vendorName?: string;
+  receiptNumber?: string;
+  description: string;
+  status: ReimbursementStatus;
+  submittedAt?: string;
+  createdAt: string;
+  approvals: ReimbursementApproval[];
+  attachments: ReimbursementAttachment[];
+  payment?: ReimbursementPayment;
+}
+
+export type NotificationCategory = 'attendance' | 'leave' | 'approval' | 'admin' | 'reimbursement';
 
 export interface AppNotification {
   id: string;

@@ -15,6 +15,8 @@ function categoryLabel(notification: AppNotification) {
       return 'Leave Update';
     case 'approval':
       return 'Approval Notification';
+    case 'reimbursement':
+      return 'Reimbursement Update';
     default:
       return 'Admin Alert';
   }

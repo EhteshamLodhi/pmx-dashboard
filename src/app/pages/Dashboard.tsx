@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Clock,
@@ -17,11 +17,13 @@ import {
   Zap,
   Download,
   Loader2,
+  ReceiptText,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { LeaveRequest } from '../types';
+import { LeaveRequest, ReimbursementRequest } from '../types';
 import { formatDisplayTime } from '@/lib/time';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
+import { mapReimbursementRequest } from '@/lib/supabase/mappers';
 
 const TODAY = new Date().toISOString().split('T')[0];
 const TODAY_LABEL = new Date().toLocaleDateString('en-US', {
@@ -267,6 +269,7 @@ export default function Dashboard() {
   const [checkInFeedback, setCheckInFeedback] = useState(false);
   const [checkOutFeedback, setCheckOutFeedback] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reimbursements, setReimbursements] = useState<ReimbursementRequest[]>([]);
 
   const myLeaveRequests = leaveRequests.filter((r) => r.userId === currentUser?.id).slice(0, 3);
 
@@ -283,8 +286,26 @@ export default function Dashboard() {
   const attendancePercentage = myRecords.length > 0 ? Math.round((presentDays / myRecords.length) * 100) : 0;
 
   const isAdmin = currentUser?.role === 'admin';
+  const isDirector = currentUser?.role === 'director';
   const canCheckIn = !todayRecord?.checkIn;
   const canCheckOut = !!todayRecord?.checkIn && !todayRecord?.checkOut;
+
+  useEffect(() => {
+    if (!isAdmin && !isDirector) return;
+    fetch('/api/reimbursements', { credentials: 'include' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (body?.data) setReimbursements(body.data.map(mapReimbursementRequest));
+      })
+      .catch(() => {
+        setReimbursements([]);
+      });
+  }, [isAdmin, isDirector]);
+
+  const directorPendingReimbursements = reimbursements.filter((request) =>
+    request.approvals.some((approval) => approval.status === 'pending' && approval.role === 'Director'),
+  );
+  const directorPendingAmount = directorPendingReimbursements.reduce((sum, request) => sum + request.amount, 0);
 
   const handleCheckIn = async () => {
     if (!canCheckIn) return;
@@ -504,6 +525,44 @@ export default function Dashboard() {
         </div>
       )}
 
+      {(isAdmin || isDirector) && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
+                <ReceiptText className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h2 className="text-gray-900" style={{ fontSize: '15px', fontWeight: 700 }}>Reimbursements Awaiting Approval</h2>
+                <p className="text-gray-500 mt-0.5" style={{ fontSize: '12px' }}>
+                  Director and admin visibility for pending reimbursement claims
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => router.push('/reimbursements')}
+              className="bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 transition-colors text-sm font-semibold"
+            >
+              Review
+            </button>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            <div className="rounded-xl bg-orange-50 p-3">
+              <p className="text-orange-700 text-xs font-semibold">Pending Count</p>
+              <p className="text-gray-900 text-xl font-bold mt-1">{directorPendingReimbursements.length}</p>
+            </div>
+            <div className="rounded-xl bg-green-50 p-3">
+              <p className="text-green-700 text-xs font-semibold">Pending Amount</p>
+              <p className="text-gray-900 text-xl font-bold mt-1">PKR {directorPendingAmount.toLocaleString('en-US')}</p>
+            </div>
+            <div className="rounded-xl bg-red-50 p-3">
+              <p className="text-red-700 text-xs font-semibold">High Priority</p>
+              <p className="text-gray-900 text-xl font-bold mt-1">{directorPendingReimbursements.filter((request) => request.amount >= 10000).length}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Quick Action tiles ── */}
       <div>
         <h2 className="text-gray-700 mb-3" style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
@@ -518,6 +577,14 @@ export default function Dashboard() {
               bg: 'bg-purple-50',
               iconColor: 'text-purple-600',
               path: '/leave',
+            },
+            {
+              label: 'Reimbursements',
+              description: 'Submit expense claims',
+              icon: ReceiptText,
+              bg: 'bg-green-50',
+              iconColor: 'text-green-600',
+              path: '/reimbursements',
             },
             {
               label: 'Approvals',

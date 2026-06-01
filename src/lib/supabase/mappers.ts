@@ -9,6 +9,12 @@ import type {
   LeaveStatus,
   LeaveType,
   NotificationCategory,
+  ReimbursementApproval,
+  ReimbursementAttachment,
+  ReimbursementCategory,
+  ReimbursementPayment,
+  ReimbursementRequest,
+  ReimbursementStatus,
   User,
   UserRole,
 } from '@/app/types';
@@ -98,6 +104,66 @@ type DbNotificationRow = {
   link?: string | null;
   is_read?: boolean | null;
   created_at: string;
+};
+
+type DbReimbursementCategoryRow = {
+  id: string;
+  name: string;
+  is_active?: boolean | null;
+};
+
+type DbReimbursementAttachmentRow = {
+  id: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  file_path?: string | null;
+  public_url?: string | null;
+  created_at: string;
+};
+
+type DbReimbursementApprovalRow = {
+  approval_level: 1 | 2 | 3;
+  approver_id: string;
+  approver_role: string;
+  status: 'pending' | 'approved' | 'rejected' | 'more_info';
+  comment?: string | null;
+  acted_at?: string | null;
+  approver?: { full_name?: string | null } | null;
+};
+
+type DbReimbursementPaymentRow = {
+  payment_date?: string | null;
+  payment_method?: 'bank_transfer' | 'cash' | 'cheque' | 'other' | null;
+  payment_reference?: string | null;
+  remarks?: string | null;
+  processed_at?: string | null;
+  processor?: { full_name?: string | null } | null;
+};
+
+type DbReimbursementRow = {
+  id: string;
+  request_number?: string | null;
+  employee_id: string;
+  category_id?: string | null;
+  expense_date: string;
+  amount: number | string;
+  currency: string;
+  project?: string | null;
+  vendor_name?: string | null;
+  receipt_number?: string | null;
+  description: string;
+  status: ReimbursementStatus;
+  submitted_at?: string | null;
+  created_at: string;
+  employee?: {
+    full_name?: string | null;
+    project?: { name?: string | null } | null;
+  } | null;
+  category?: { name?: string | null } | null;
+  reimbursement_approvals?: DbReimbursementApprovalRow[] | null;
+  reimbursement_attachments?: DbReimbursementAttachmentRow[] | null;
+  reimbursement_payments?: DbReimbursementPaymentRow[] | null;
 };
 
 function formatTime(value?: Nullable<string>) {
@@ -215,5 +281,75 @@ export function mapNotification(row: DbNotificationRow): AppNotification {
     link: row.link ?? undefined,
     isRead: row.is_read ?? false,
     createdAt: row.created_at,
+  };
+}
+
+export function mapReimbursementCategory(row: DbReimbursementCategoryRow): ReimbursementCategory {
+  return {
+    id: row.id,
+    name: row.name,
+    isActive: row.is_active ?? true,
+  };
+}
+
+export function mapReimbursementAttachment(row: DbReimbursementAttachmentRow): ReimbursementAttachment {
+  return {
+    id: row.id,
+    fileName: row.file_name,
+    fileType: row.file_type,
+    fileSize: row.file_size,
+    url: row.public_url ?? row.file_path ?? '',
+    createdAt: row.created_at,
+  };
+}
+
+export function mapReimbursementApproval(row: DbReimbursementApprovalRow): ReimbursementApproval {
+  return {
+    level: row.approval_level,
+    approverId: row.approver_id,
+    approverName: row.approver?.full_name ?? row.approver_role,
+    role: row.approver_role,
+    status: row.status,
+    timestamp: row.acted_at ?? undefined,
+    comment: row.comment ?? undefined,
+  };
+}
+
+export function mapReimbursementPayment(row?: DbReimbursementPaymentRow | null): ReimbursementPayment | undefined {
+  if (!row) return undefined;
+  return {
+    paymentDate: row.payment_date ?? undefined,
+    paymentMethod: row.payment_method ?? undefined,
+    referenceNumber: row.payment_reference ?? undefined,
+    remarks: row.remarks ?? undefined,
+    processedBy: row.processor?.full_name ?? undefined,
+    processedAt: row.processed_at ?? undefined,
+  };
+}
+
+export function mapReimbursementRequest(row: DbReimbursementRow): ReimbursementRequest {
+  return {
+    id: row.id,
+    requestNumber: row.request_number ?? row.id.slice(0, 8).toUpperCase(),
+    userId: row.employee_id,
+    userName: row.employee?.full_name ?? 'Unknown User',
+    userProject: row.employee?.project?.name ?? 'Unassigned',
+    categoryId: row.category_id ?? undefined,
+    categoryName: row.category?.name ?? 'Miscellaneous',
+    expenseDate: row.expense_date,
+    amount: Number(row.amount),
+    currency: row.currency,
+    project: row.project ?? undefined,
+    vendorName: row.vendor_name ?? undefined,
+    receiptNumber: row.receipt_number ?? undefined,
+    description: row.description,
+    status: row.status,
+    submittedAt: row.submitted_at ?? undefined,
+    createdAt: row.created_at,
+    approvals: (row.reimbursement_approvals ?? [])
+      .sort((a, b) => a.approval_level - b.approval_level)
+      .map(mapReimbursementApproval),
+    attachments: (row.reimbursement_attachments ?? []).map(mapReimbursementAttachment),
+    payment: mapReimbursementPayment(row.reimbursement_payments?.[0]),
   };
 }
