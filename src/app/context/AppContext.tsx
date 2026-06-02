@@ -821,6 +821,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const workDate = updates.date ?? today;
       const payload = {
         id,
+        work_date: workDate,
         check_in_at: updates.checkIn ? new Date(`${workDate}T${updates.checkIn}:00`).toISOString() : null,
         check_out_at: updates.checkOut ? new Date(`${workDate}T${updates.checkOut}:00`).toISOString() : null,
         total_hours: getTotalHours(updates.checkIn, updates.checkOut) ?? null,

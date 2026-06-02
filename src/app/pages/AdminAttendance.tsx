@@ -1,7 +1,7 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Award, BarChart3, Calendar, CheckCircle2, Clock, Edit3, Loader2, Search, Shield, Users } from 'lucide-react';
+import { AlertTriangle, Award, BarChart3, Calendar, CheckCircle2, Clock, Download, Edit3, Loader2, RotateCcw, Search, Shield, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { AttendanceRecord, AttendanceStatus, PolicySettings, User } from '../types';
 import { formatDisplayTime } from '@/lib/time';
@@ -16,8 +16,19 @@ import {
   type AttendanceRangeKey,
 } from '@/lib/attendance-analytics';
 import { getNonWorkingStatus } from '@/lib/attendance-calendar';
+import { downloadAttendanceSnapshot } from '@/lib/attendance-snapshot';
 
 const TODAY = new Date().toISOString().split('T')[0];
+
+function formatDateLabel(date: string) {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
 
 function getStatusMeta(status: AttendanceStatus | 'absent') {
   switch (status) {
@@ -54,6 +65,7 @@ export default function AdminAttendance() {
   const [policy, setPolicy] = useState<PolicySettings | null>(null);
   const [editing, setEditing] = useState<{ user: User; record?: AttendanceRecord } | null>(null);
   const [editForm, setEditForm] = useState({
+    date: selectedDate,
     checkIn: '',
     checkOut: '',
     status: 'present' as AttendanceStatus,
@@ -102,6 +114,36 @@ export default function AdminAttendance() {
     weeklyOff: rows.filter(({ effectiveStatus }) => effectiveStatus === 'weekly-off').length,
   };
 
+  const resetFilters = () => {
+    setSelectedDate(TODAY);
+    setProject('all');
+    setSearch('');
+    setStatusFilter('all');
+  };
+
+  const handleSnapshot = () => {
+    downloadAttendanceSnapshot({
+      dateLabel: formatDateLabel(selectedDate),
+      generatedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      rows: rows.map(({ user, record, effectiveStatus }) => ({
+        employeeName: user.name,
+        position: user.position,
+        project: user.project ?? 'Unassigned',
+        checkIn: record?.checkIn,
+        checkOut: record?.checkOut,
+        statusLabel: getStatusMeta(effectiveStatus).label,
+        status: effectiveStatus,
+      })),
+      summary: {
+        present: summary.present,
+        late: summary.late,
+        absent: summary.absent,
+        onLeave: summary.leave,
+        total: summary.total,
+      },
+    });
+  };
+
   const analyticsRows = useMemo(() => {
     const baseRows = rows.map(({ user }) => {
       const userRecords = filterRecordsByRange(
@@ -144,6 +186,7 @@ export default function AdminAttendance() {
   const openEdit = (user: User, record?: AttendanceRecord) => {
     setEditing({ user, record });
     setEditForm({
+      date: record?.date ?? selectedDate,
       checkIn: record?.checkIn ?? '',
       checkOut: record?.checkOut ?? '',
       status: record?.status ?? 'present',
@@ -155,14 +198,14 @@ export default function AdminAttendance() {
     if (!editing) return;
     const payload = {
       userId: editing.user.id,
-      date: selectedDate,
+      date: editForm.date,
       checkIn: editForm.checkIn || undefined,
       checkOut: editForm.checkOut || undefined,
       status: editForm.status,
       notes: editForm.notes || undefined,
     };
 
-    await runAction(`admin-attendance:${editing.user.id}:${selectedDate}`, async () => {
+    await runAction(`admin-attendance:${editing.user.id}:${editForm.date}`, async () => {
       setEditError(null);
       if (editing.record) {
         await updateAttendanceRecord(editing.record.id, payload);
@@ -178,7 +221,7 @@ export default function AdminAttendance() {
       setEditError(error instanceof Error ? error.message : 'Unable to save this attendance update.');
     });
   };
-  const savingEdit = editing ? isPending(`admin-attendance:${editing.user.id}:${selectedDate}`) : false;
+  const savingEdit = editing ? isPending(`admin-attendance:${editing.user.id}:${editForm.date}`) : false;
 
   const canViewAnalytics = currentUser?.role === 'admin' || currentUser?.role === 'director';
   const canEditAttendance = currentUser?.role === 'admin';
@@ -260,6 +303,27 @@ export default function AdminAttendance() {
               <option value="weekly-off">Weekly Off</option>
             </select>
           </label>
+        </div>
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <p className="text-xs text-gray-400">
+            Showing {rows.length} employee record{rows.length === 1 ? '' : 's'} for {formatDateLabel(selectedDate)}.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={resetFilters}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Reset Filters
+            </button>
+            <button
+              onClick={handleSnapshot}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-700"
+            >
+              <Download className="w-4 h-4" />
+              Screenshot to share
+            </button>
+          </div>
         </div>
       </div>
 
@@ -390,10 +454,54 @@ export default function AdminAttendance() {
             <h2 className="text-gray-900 font-semibold">Attendance Report</h2>
             <p className="text-gray-400 text-xs">{selectedDate} - {rows.length} employees</p>
           </div>
-          <span className="text-xs text-gray-400 bg-gray-50 px-3 py-1.5 rounded-lg">Screenshot-ready</span>
+          <button
+            onClick={handleSnapshot}
+            className="inline-flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg hover:bg-gray-100"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Screenshot-ready
+          </button>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="md:hidden divide-y divide-gray-50">
+          {rows.map(({ user, record, effectiveStatus }) => {
+            const meta = getStatusMeta(effectiveStatus);
+            return (
+              <div key={user.id} className={`${meta.row} p-4`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-900 truncate">{user.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{user.project ?? 'Unassigned'}</p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${meta.badge}`}>{meta.label}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="rounded-xl bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-bold text-gray-400">CHECK IN</p>
+                    <p className="text-sm font-semibold text-gray-800">{formatDisplayTime(record?.checkIn)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-bold text-gray-400">CHECK OUT</p>
+                    <p className="text-sm font-semibold text-gray-800">{formatDisplayTime(record?.checkOut)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-bold text-gray-400">HOURS</p>
+                    <p className="text-sm font-semibold text-gray-800">{formatHours(record)}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => openEdit(user, record)}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+                >
+                  <Edit3 className="w-4 h-4" />
+                  Edit Attendance
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-400 uppercase text-[11px] tracking-wide">
               <tr>
@@ -442,10 +550,19 @@ export default function AdminAttendance() {
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden">
             <div className="bg-green-600 text-white px-5 py-4">
               <h3 className="font-semibold">Edit Attendance Entry</h3>
-              <p className="text-sm text-green-100">{editing.user.name} - {selectedDate}</p>
+              <p className="text-sm text-green-100">{editing.user.name} - {editForm.date}</p>
             </div>
             <div className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <label className="text-sm text-gray-600 block">
+                Attendance Date
+                <input
+                  type="date"
+                  value={editForm.date}
+                  onChange={(event) => setEditForm((form) => ({ ...form, date: event.target.value }))}
+                  className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="text-sm text-gray-600">
                   Edit Check-in Time
                   <input type="time" value={editForm.checkIn} onChange={(event) => setEditForm((form) => ({ ...form, checkIn: event.target.value }))} className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-green-500" />

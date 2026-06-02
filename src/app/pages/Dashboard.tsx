@@ -20,18 +20,25 @@ import {
   ReceiptText,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { LeaveRequest, ReimbursementRequest } from '../types';
+import { AttendanceRecord, AttendanceStatus, LeaveRequest, ReimbursementRequest, User } from '../types';
 import { formatDisplayTime } from '@/lib/time';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
 import { mapReimbursementRequest } from '@/lib/supabase/mappers';
+import { downloadAttendanceSnapshot, type AttendanceSnapshotRow } from '@/lib/attendance-snapshot';
 
 const TODAY = new Date().toISOString().split('T')[0];
-const TODAY_LABEL = new Date().toLocaleDateString('en-US', {
-  weekday: 'long',
-  month: 'long',
-  day: 'numeric',
-  year: 'numeric',
-});
+
+function formatDateLabel(date: string) {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+const TODAY_LABEL = formatDateLabel(TODAY);
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -260,8 +267,218 @@ function AdminDailyBoard() {
 }
 
 // ─── Employee Dashboard ─────────────────────────────────────────────────────────
+function getBoardRows(users: User[], attendanceRecords: AttendanceRecord[], selectedDate: string) {
+  const activeUsers = users.filter((user) => user.isActive && user.role !== 'admin');
+  const dateRecords = attendanceRecords.filter((record) => record.date === selectedDate);
+
+  return activeUsers.map((user) => {
+    const record = dateRecords.find((item) => item.userId === user.id);
+    const status = (record?.status ?? 'absent') as AttendanceStatus | 'absent';
+    const badge = getStatusBadge(status);
+    return {
+      user,
+      record,
+      status,
+      badge,
+      snapshot: {
+        employeeName: user.name,
+        position: user.position,
+        project: user.project ?? 'Unassigned',
+        checkIn: record?.checkIn,
+        checkOut: record?.checkOut,
+        statusLabel: badge.label,
+        status,
+      } satisfies AttendanceSnapshotRow,
+    };
+  });
+}
+
+function getBoardSummary(rows: ReturnType<typeof getBoardRows>) {
+  return {
+    present: rows.filter(({ status }) => status === 'present' || status === 'checked-in-only').length,
+    late: rows.filter(({ status }) => status === 'late').length,
+    absent: rows.filter(({ status }) => status === 'absent').length,
+    onLeave: rows.filter(({ status }) => status === 'on-leave').length,
+    total: rows.length,
+  };
+}
+
+function DynamicAdminDailyBoard({
+  selectedDate,
+  rows,
+  summary,
+}: {
+  selectedDate: string;
+  rows: ReturnType<typeof getBoardRows>;
+  summary: ReturnType<typeof getBoardSummary>;
+}) {
+  const selectedDateLabel = formatDateLabel(selectedDate);
+  const generatedAt = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-gradient-to-r from-green-700 to-green-600 px-4 sm:px-5 py-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+              <Zap className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <p className="text-white" style={{ fontSize: '15px', fontWeight: 700 }}>PowerMatix</p>
+              <p className="text-green-200" style={{ fontSize: '11px', letterSpacing: '0.05em' }}>
+                DAILY ATTENDANCE REPORT
+              </p>
+            </div>
+          </div>
+          <div className="sm:text-right">
+            <p className="text-white" style={{ fontSize: '13px', fontWeight: 600 }}>{selectedDateLabel}</p>
+            <p className="text-green-200" style={{ fontSize: '11px' }}>Auto-generated - {generatedAt}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex gap-2 flex-wrap">
+          {[
+            { label: 'Present', value: summary.present, bg: 'bg-white/20', text: 'text-white' },
+            { label: 'Late', value: summary.late, bg: 'bg-yellow-400/30', text: 'text-yellow-100' },
+            { label: 'Absent', value: summary.absent, bg: 'bg-red-400/30', text: 'text-red-100' },
+            { label: 'On Leave', value: summary.onLeave, bg: 'bg-blue-400/30', text: 'text-blue-100' },
+          ].map((item) => (
+            <div key={item.label} className={`${item.bg} px-3 py-1.5 rounded-xl flex items-center gap-2`}>
+              <span className={`${item.text}`} style={{ fontSize: '18px', fontWeight: 700 }}>{item.value}</span>
+              <span className={`${item.text} opacity-80`} style={{ fontSize: '11px', fontWeight: 500 }}>{item.label}</span>
+            </div>
+          ))}
+          <div className="sm:ml-auto bg-white/10 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5 text-green-200" />
+            <span className="text-green-100" style={{ fontSize: '12px', fontWeight: 500 }}>
+              {summary.total} Total
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="hidden md:grid grid-cols-12 gap-0 px-4 py-2 border-b border-gray-100 bg-gray-50">
+        {[
+          { label: 'Employee', span: 'col-span-4' },
+          { label: 'Project', span: 'col-span-3' },
+          { label: 'Check In', span: 'col-span-2 text-center' },
+          { label: 'Check Out', span: 'col-span-2 text-center' },
+          { label: 'Status', span: 'col-span-1 text-center' },
+        ].map((col) => (
+          <div key={col.label} className={col.span}>
+            <span className="text-gray-400 uppercase" style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.07em' }}>
+              {col.label}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden md:block divide-y divide-gray-50">
+        {rows.map(({ user, record, badge }, idx) => {
+          const duration = getDuration(record?.checkIn, record?.checkOut);
+          return (
+            <div
+              key={user.id}
+              className={`grid grid-cols-12 gap-0 px-4 py-3 items-center ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
+            >
+              <div className="col-span-4 flex items-center gap-2.5 min-w-0">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${record?.checkIn ? 'bg-green-100' : 'bg-gray-100'}`}>
+                  <span className={`${record?.checkIn ? 'text-green-700' : 'text-gray-500'}`} style={{ fontSize: '11px', fontWeight: 700 }}>
+                    {user.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-gray-900 truncate" style={{ fontSize: '13px', fontWeight: 600 }}>{user.name}</p>
+                  <p className="text-gray-400 truncate" style={{ fontSize: '11px' }}>{user.position}</p>
+                </div>
+              </div>
+              <div className="col-span-3">
+                <p className="text-gray-600 truncate" style={{ fontSize: '12px' }}>{user.project ?? 'Unassigned'}</p>
+              </div>
+              <div className="col-span-2 text-center">
+                <span className="text-green-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 600 }}>
+                  {formatDisplayTime(record?.checkIn)}
+                </span>
+              </div>
+              <div className="col-span-2 text-center">
+                {record?.checkOut ? (
+                  <div>
+                    <span className="text-blue-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 600 }}>
+                      {formatDisplayTime(record.checkOut)}
+                    </span>
+                    {duration && <p className="text-gray-400" style={{ fontSize: '10px' }}>{duration}</p>}
+                  </div>
+                ) : record?.checkIn ? (
+                  <span className="text-orange-400" style={{ fontSize: '11px' }}>Active</span>
+                ) : (
+                  <span className="text-gray-300" style={{ fontSize: '13px' }}>-</span>
+                )}
+              </div>
+              <div className="col-span-1 flex justify-center">
+                <div className={`w-2.5 h-2.5 rounded-full ${badge.dot}`} title={badge.label} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="md:hidden divide-y divide-gray-50">
+        {rows.map(({ user, record, badge }) => (
+          <div key={user.id} className="px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${record?.checkIn ? 'bg-green-100' : 'bg-gray-100'}`}>
+                  <span className={`${record?.checkIn ? 'text-green-700' : 'text-gray-500'}`} style={{ fontSize: '11px', fontWeight: 700 }}>
+                    {user.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-gray-900 truncate" style={{ fontSize: '13px', fontWeight: 700 }}>{user.name}</p>
+                  <p className="text-gray-400 truncate" style={{ fontSize: '11px' }}>{user.project ?? 'Unassigned'}</p>
+                </div>
+              </div>
+              <span className={`px-2 py-1 rounded-lg ${badge.cls}`} style={{ fontSize: '10px', fontWeight: 700 }}>
+                {badge.label}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-gray-50 px-3 py-2">
+                <p className="text-gray-400" style={{ fontSize: '10px', fontWeight: 700 }}>CHECK IN</p>
+                <p className="text-green-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 700 }}>{formatDisplayTime(record?.checkIn)}</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 px-3 py-2">
+                <p className="text-gray-400" style={{ fontSize: '10px', fontWeight: 700 }}>CHECK OUT</p>
+                <p className="text-blue-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 700 }}>
+                  {record?.checkOut ? formatDisplayTime(record.checkOut) : record?.checkIn ? 'Active' : '-'}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          {[
+            { dot: 'bg-green-500', label: 'Present' },
+            { dot: 'bg-yellow-500', label: 'Late' },
+            { dot: 'bg-red-500', label: 'Absent' },
+            { dot: 'bg-blue-500', label: 'On Leave' },
+          ].map((item) => (
+            <div key={item.label} className="flex items-center gap-1.5">
+              <div className={`w-2 h-2 rounded-full ${item.dot}`} />
+              <span className="text-gray-400" style={{ fontSize: '10px' }}>{item.label}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-gray-300" style={{ fontSize: '10px' }}>powermatix.com</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
-  const { currentUser, getTodayRecord, leaveRequests, attendanceRecords, checkIn, checkOut } = useApp();
+  const { currentUser, users, getTodayRecord, leaveRequests, attendanceRecords, checkIn, checkOut } = useApp();
   const { isPending, runAction } = useActionRunner();
   const router = useRouter();
   const todayRecord = getTodayRecord();
@@ -270,6 +487,7 @@ export default function Dashboard() {
   const [checkOutFeedback, setCheckOutFeedback] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reimbursements, setReimbursements] = useState<ReimbursementRequest[]>([]);
+  const [adminBoardDate, setAdminBoardDate] = useState(TODAY);
 
   const myLeaveRequests = leaveRequests.filter((r) => r.userId === currentUser?.id).slice(0, 3);
 
@@ -289,6 +507,8 @@ export default function Dashboard() {
   const isDirector = currentUser?.role === 'director';
   const canCheckIn = !todayRecord?.checkIn;
   const canCheckOut = !!todayRecord?.checkIn && !todayRecord?.checkOut;
+  const adminBoardRows = getBoardRows(users, attendanceRecords, adminBoardDate);
+  const adminBoardSummary = getBoardSummary(adminBoardRows);
 
   useEffect(() => {
     if (!isAdmin && !isDirector) return;
@@ -336,6 +556,14 @@ export default function Dashboard() {
       error: 'Unable to check out right now.',
     }).catch((error) => {
       setActionError(error instanceof Error ? error.message : 'Unable to check out right now.');
+    });
+  };
+  const handleBoardSnapshot = () => {
+    downloadAttendanceSnapshot({
+      dateLabel: formatDateLabel(adminBoardDate),
+      generatedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      rows: adminBoardRows.map((row) => row.snapshot),
+      summary: adminBoardSummary,
     });
   };
   const checkingIn = isPending('dashboard-check-in');
@@ -511,17 +739,27 @@ export default function Dashboard() {
       {/* ── Admin: Daily Attendance Board ── */}
       {isAdmin && (
         <div>
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
             <h2 className="text-gray-700" style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
               Daily Attendance Board
             </h2>
-            <span className="text-gray-400 bg-gray-100 px-2.5 py-1 rounded-lg flex items-center gap-1.5"
-              style={{ fontSize: '11px' }}>
-              <Download className="w-3 h-3" />
-              Screenshot to share
-            </span>
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+              <input
+                type="date"
+                value={adminBoardDate}
+                onChange={(event) => setAdminBoardDate(event.target.value)}
+                className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 outline-none focus:ring-2 focus:ring-green-500 text-sm"
+              />
+              <button
+                onClick={handleBoardSnapshot}
+                className="text-gray-500 bg-gray-100 px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 hover:bg-gray-200 transition-colors text-sm font-semibold"
+              >
+                <Download className="w-4 h-4" />
+                Screenshot to share
+              </button>
+            </div>
           </div>
-          <AdminDailyBoard />
+          <DynamicAdminDailyBoard selectedDate={adminBoardDate} rows={adminBoardRows} summary={adminBoardSummary} />
         </div>
       )}
 
