@@ -62,10 +62,14 @@ export function downloadAttendanceSnapshot(options: {
   rows: AttendanceSnapshotRow[];
   summary: AttendanceSnapshotSummary;
 }) {
-  const width = 1440;
-  const rowHeight = 72;
-  const visibleRows = options.rows.slice(0, 28);
-  const height = 260 + visibleRows.length * rowHeight + 72;
+  const width = 1080;
+  const rowHeight = 132;
+  const visibleRows = options.rows;
+  const headerHeight = 218;
+  const summaryTop = 246;
+  const summaryHeight = 244;
+  const listTop = summaryTop + summaryHeight + 26;
+  const height = listTop + visibleRows.length * rowHeight + 44;
   const scale = 2;
   const canvas = document.createElement('canvas');
   canvas.width = width * scale;
@@ -78,116 +82,109 @@ export function downloadAttendanceSnapshot(options: {
   context.fillRect(0, 0, width, height);
 
   context.fillStyle = '#049A3B';
-  roundRect(context, 24, 24, width - 48, 182, 24);
+  roundRect(context, 28, 24, width - 56, headerHeight, 26);
   context.fill();
 
   context.fillStyle = 'rgba(255,255,255,0.18)';
-  roundRect(context, 54, 52, 54, 54, 16);
+  roundRect(context, 58, 56, 70, 70, 18);
   context.fill();
   context.fillStyle = '#FFFFFF';
-  context.font = '700 34px Arial';
-  context.fillText('P', 72, 91);
+  context.font = '700 44px Arial';
+  context.fillText('P', 84, 105);
 
-  context.font = '700 24px Arial';
-  context.fillText('PowerMatix', 126, 72);
-  context.font = '600 16px Arial';
+  context.font = '700 38px Arial';
+  context.fillText('PowerMatix', 150, 84);
+  context.font = '700 22px Arial';
   context.fillStyle = '#D4F8DF';
-  context.fillText('DAILY ATTENDANCE REPORT', 126, 100);
+  context.fillText('DAILY ATTENDANCE REPORT', 150, 118);
 
   context.fillStyle = '#FFFFFF';
-  context.font = '700 20px Arial';
+  context.font = '700 26px Arial';
   context.textAlign = 'right';
-  context.fillText(options.dateLabel, width - 58, 72);
+  context.fillText(options.dateLabel, width - 58, 82);
   context.fillStyle = '#D4F8DF';
-  context.font = '500 15px Arial';
-  context.fillText(`Auto-generated - ${options.generatedAt}`, width - 58, 100);
+  context.font = '600 19px Arial';
+  context.fillText(`Auto-generated - ${options.generatedAt}`, width - 58, 114);
   context.textAlign = 'left';
 
-  const chips = [
-    ['Present', options.summary.present, '#32B567'],
-    ['Late', options.summary.late, '#84A51F'],
-    ['Absent', options.summary.absent, '#687C4E'],
-    ['On Leave', options.summary.onLeave, '#159E87'],
-    ['Total', options.summary.total, '#18B454'],
+  const summaryCards = [
+    ['Present', options.summary.present, '#0ABF53'],
+    ['Late', options.summary.late, '#F59E0B'],
+    ['Absent', options.summary.absent, '#FF3347'],
+    ['On Leave', options.summary.onLeave, '#0EA5E9'],
+    ['Total Employees', options.summary.total, '#111827'],
   ] as const;
 
-  let chipX = 54;
-  chips.forEach(([label, value, color]) => {
-    context.fillStyle = color;
-    roundRect(context, chipX, 130, 140, 54, 18);
-    context.fill();
+  summaryCards.forEach(([label, value, color], index) => {
+    const cardWidth = index === 4 ? width - 72 : (width - 96) / 2;
+    const x = 36 + (index % 2) * (cardWidth + 24);
+    const actualY = summaryTop + Math.floor(index / 2) * 78;
     context.fillStyle = '#FFFFFF';
-    context.font = '700 26px Arial';
-    context.fillText(String(value), chipX + 20, 164);
-    context.font = '600 14px Arial';
-    context.fillText(label, chipX + 58, 162);
-    chipX += 154;
+    roundRect(context, x, actualY, cardWidth, 64, 18);
+    context.fill();
+    context.fillStyle = color;
+    context.font = '700 30px Arial';
+    context.fillText(String(value), x + 22, actualY + 42);
+    context.fillStyle = '#475569';
+    context.font = '700 20px Arial';
+    context.fillText(label, x + 86, actualY + 39);
   });
 
-  const tableTop = 230;
-  context.fillStyle = '#FFFFFF';
-  roundRect(context, 24, tableTop, width - 48, height - tableTop - 24, 22);
-  context.fill();
-
-  context.fillStyle = '#F3F4F6';
-  context.fillRect(24, tableTop, width - 48, 52);
-  context.fillStyle = '#94A3B8';
-  context.font = '700 13px Arial';
-  context.fillText('EMPLOYEE', 54, tableTop + 32);
-  context.fillText('PROJECT', 492, tableTop + 32);
-  context.fillText('CHECK IN', 868, tableTop + 32);
-  context.fillText('CHECK OUT', 1060, tableTop + 32);
-  context.fillText('STATUS', 1250, tableTop + 32);
+  context.fillStyle = '#334155';
+  context.font = '700 24px Arial';
+  context.fillText('Employee Attendance', 40, listTop - 12);
 
   visibleRows.forEach((row, index) => {
-    const y = tableTop + 52 + index * rowHeight;
-    context.fillStyle = index % 2 === 0 ? '#FFFFFF' : '#FAFAFA';
-    context.fillRect(24, y, width - 48, rowHeight);
+    const y = listTop + index * rowHeight;
+    context.fillStyle = '#FFFFFF';
+    roundRect(context, 36, y, width - 72, rowHeight - 16, 22);
+    context.fill();
+
     context.fillStyle = '#F1F5F9';
-    roundRect(context, 54, y + 14, 44, 44, 22);
+    roundRect(context, 58, y + 26, 62, 62, 31);
     context.fill();
     context.fillStyle = '#64748B';
-    context.font = '700 13px Arial';
-    context.fillText(
-      row.employeeName
-        .split(' ')
-        .map((part) => part[0])
-        .join('')
-        .slice(0, 2)
-        .toUpperCase(),
-      66,
-      y + 42,
-    );
+    context.font = '700 20px Arial';
+    const initials = row.employeeName
+      .split(' ')
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+    context.textAlign = 'center';
+    context.fillText(initials, 89, y + 65);
+    context.textAlign = 'left';
 
     context.fillStyle = '#111827';
-    context.font = '700 16px Arial';
-    drawText(context, row.employeeName, 116, y + 34, 320);
+    context.font = '700 27px Arial';
+    drawText(context, row.employeeName, 142, y + 42, 430);
     context.fillStyle = '#94A3B8';
-    context.font = '500 13px Arial';
-    drawText(context, row.position ?? 'Employee', 116, y + 54, 320);
+    context.font = '600 19px Arial';
+    drawText(context, `${row.position ?? 'Employee'} - ${row.project ?? 'Unassigned'}`, 142, y + 72, 560);
 
-    context.fillStyle = '#4B5563';
-    context.font = '500 15px Arial';
-    drawText(context, row.project ?? 'Unassigned', 492, y + 42, 300);
-
-    context.fillStyle = '#038C3E';
-    context.font = '700 16px Arial';
-    context.fillText(formatDisplayTime(row.checkIn), 868, y + 42);
-
-    context.fillStyle = row.checkOut ? '#1D4ED8' : '#F97316';
-    context.fillText(row.checkOut ? formatDisplayTime(row.checkOut) : row.checkIn ? 'Active' : '-', 1060, y + 42);
-
+    const status = row.statusLabel;
+    const statusWidth = Math.max(116, context.measureText(status).width + 46);
+    context.fillStyle = `${statusColor(row.status)}18`;
+    roundRect(context, width - 60 - statusWidth, y + 28, statusWidth, 42, 21);
+    context.fill();
     context.fillStyle = statusColor(row.status);
     context.beginPath();
-    context.arc(1264, y + 38, 7, 0, Math.PI * 2);
+    context.arc(width - 42 - statusWidth, y + 49, 8, 0, Math.PI * 2);
     context.fill();
-    context.font = '600 13px Arial';
-    context.fillText(row.statusLabel, 1280, y + 42);
+    context.font = '700 20px Arial';
+    context.fillText(status, width - 28 - statusWidth, y + 56);
+
+    context.fillStyle = '#038C3E';
+    context.font = '700 21px Arial';
+    context.fillText(`In: ${formatDisplayTime(row.checkIn)}`, 142, y + 104);
+
+    context.fillStyle = row.checkOut ? '#1D4ED8' : '#F97316';
+    context.fillText(`Out: ${row.checkOut ? formatDisplayTime(row.checkOut) : row.checkIn ? 'Active' : '-'}`, 420, y + 104);
   });
 
   if (options.rows.length > visibleRows.length) {
     context.fillStyle = '#64748B';
-    context.font = '600 13px Arial';
+    context.font = '600 18px Arial';
     context.fillText(`+${options.rows.length - visibleRows.length} more employees in portal`, 54, height - 42);
   }
 
