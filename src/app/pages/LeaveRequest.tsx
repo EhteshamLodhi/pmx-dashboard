@@ -91,6 +91,13 @@ export default function LeaveRequestPage() {
       });
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('new') === '1') {
+      setShowForm(true);
+    }
+  }, []);
+
   const myRequests = leaveRequests
     .filter((r) => r.userId === currentUser?.id)
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));

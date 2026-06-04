@@ -173,6 +173,13 @@ export default function Reimbursements() {
     void load().catch((loadError) => setError(loadError instanceof Error ? loadError.message : 'Unable to load reimbursements.'));
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('new') === '1') {
+      setShowForm(true);
+    }
+  }, []);
+
   const myRequests = useMemo(
     () => requests.filter((request) => request.userId === currentUser?.id),
     [currentUser?.id, requests],

@@ -814,7 +814,7 @@ export default function Dashboard() {
               icon: CalendarDays,
               bg: 'bg-purple-50',
               iconColor: 'text-purple-600',
-              path: '/leave',
+              path: '/leave?new=1',
             },
             {
               label: 'Reimbursements',
@@ -822,7 +822,7 @@ export default function Dashboard() {
               icon: ReceiptText,
               bg: 'bg-green-50',
               iconColor: 'text-green-600',
-              path: '/reimbursements',
+              path: '/reimbursements?new=1',
             },
             {
               label: 'Approvals',
