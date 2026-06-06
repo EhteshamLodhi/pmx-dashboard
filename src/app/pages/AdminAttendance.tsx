@@ -73,7 +73,7 @@ export default function AdminAttendance() {
   });
   const [editError, setEditError] = useState<string | null>(null);
 
-  const activeEmployees = users.filter((user) => user.isActive && user.role !== 'admin');
+  const activeEmployees = users.filter((user) => user.isActive);
   const projects = Array.from(new Set(activeEmployees.map((user) => user.project ?? 'Unassigned')));
 
   useEffect(() => {

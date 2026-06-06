@@ -94,7 +94,7 @@ function getDuration(checkIn?: string, checkOut?: string) {
 function AdminDailyBoard() {
   const { users, attendanceRecords } = useApp();
 
-  const activeUsers = users.filter((u) => u.isActive && u.role !== 'admin');
+  const activeUsers = users.filter((u) => u.isActive);
   const todayRecords = attendanceRecords.filter((r) => r.date === TODAY);
 
   const getRecord = (userId: string) =>
@@ -268,7 +268,7 @@ function AdminDailyBoard() {
 
 // ─── Employee Dashboard ─────────────────────────────────────────────────────────
 function getBoardRows(users: User[], attendanceRecords: AttendanceRecord[], selectedDate: string) {
-  const activeUsers = users.filter((user) => user.isActive && user.role !== 'admin');
+  const activeUsers = users.filter((user) => user.isActive);
   const dateRecords = attendanceRecords.filter((record) => record.date === selectedDate);
 
   return activeUsers.map((user) => {

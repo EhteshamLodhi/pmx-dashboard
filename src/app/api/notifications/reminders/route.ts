@@ -195,7 +195,7 @@ async function runReminderJob(request: Request) {
   const holiday = holidayForDate(mappedHolidays, workDate);
   const weeklyOff = isWeeklyOff(workDate, policy);
   const approvedLeaveUserIds = new Set((approvedLeaves ?? []).map((leave) => leave.employee_id));
-  const employeeUsers = (users ?? []).filter((user) => user.role !== 'admin');
+  const employeeUsers = users ?? [];
   const eligibleReminderUsers = employeeUsers.filter(
     (user) => !holiday && !weeklyOff && !approvedLeaveUserIds.has(user.id),
   );

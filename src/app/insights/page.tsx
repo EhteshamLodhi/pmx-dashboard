@@ -1,18 +1,12 @@
-'use client';
-
 import PortalLayout from '../components/Layout';
-import Attendance from '../pages/Attendance';
+import EmployeeInsights from '../pages/EmployeeInsights';
 import { RouteTransition } from '@/components/route-transition';
 
-function AttendanceRouteContent() {
-  return <Attendance />;
-}
-
-export default function AttendancePage() {
+export default function InsightsPage() {
   return (
     <PortalLayout>
       <RouteTransition>
-        <AttendanceRouteContent />
+        <EmployeeInsights />
       </RouteTransition>
     </PortalLayout>
   );
