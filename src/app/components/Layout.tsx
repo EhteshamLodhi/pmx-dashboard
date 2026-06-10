@@ -44,7 +44,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { path: '/admin/users', label: 'User Management', icon: Users },
-  { path: '/admin/attendance', label: 'Edit Attendance', icon: ClipboardEdit },
+  { path: '/admin/attendance', label: 'Attendance Report', icon: ClipboardEdit },
 ];
 
 const BOTTOM_NAV: NavItem[] = [

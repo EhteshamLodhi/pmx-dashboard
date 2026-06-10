@@ -22,6 +22,7 @@ import { useApp } from '../context/AppContext';
 import { LeaveApproval, LeaveRequest, ReimbursementApproval, ReimbursementRequest } from '../types';
 import { mapReimbursementRequest } from '@/lib/supabase/mappers';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
+import { getVisibleUserIdsForHierarchy } from '@/lib/hierarchy';
 
 type StatusTab = 'pending' | 'all';
 type CategoryTab = 'all' | 'leave' | 'reimbursement' | 'attendance';
@@ -78,10 +79,18 @@ function previousApprovalComments<T extends LeaveApproval | ReimbursementApprova
 function canActOnApproval(
   approval: LeaveApproval | ReimbursementApproval | undefined,
   currentUserId?: string,
+) {
+  if (!approval || !currentUserId) return false;
+  return approval.approverId === currentUserId;
+}
+
+function canActOnReimbursementApproval(
+  approval: ReimbursementApproval | undefined,
+  currentUserId?: string,
   currentUserRole?: string,
 ) {
   if (!approval || !currentUserId) return false;
-  return currentUserRole === 'admin' || approval.approverId === currentUserId;
+  return currentUserRole === 'manager' && approval.approverId === currentUserId;
 }
 
 function Timeline({
@@ -562,7 +571,7 @@ function ReimbursementApprovalCard({
 
 export default function Approvals() {
   const router = useRouter();
-  const { currentUser, leaveRequests, approveLeave } = useApp();
+  const { currentUser, users, leaveRequests, approveLeave } = useApp();
   const { isPending, runAction } = useActionRunner();
   const [statusTab, setStatusTab] = useState<StatusTab>('pending');
   const [categoryTab, setCategoryTab] = useState<CategoryTab>('all');
@@ -571,6 +580,7 @@ export default function Approvals() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const isApprover = ['manager', 'director', 'admin'].includes(currentUser?.role ?? '');
+  const visibleUserIds = useMemo(() => getVisibleUserIdsForHierarchy(currentUser, users), [currentUser, users]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -602,10 +612,10 @@ export default function Approvals() {
       leaveRequests.filter((request) => {
         if (!currentUser) return false;
         if (!isApprover) return request.userId === currentUser.id;
-        if (currentUser.role === 'admin') return true;
-        return request.approvals.some((approval) => approval.approverId === currentUser.id) || request.userId === currentUser.id;
+        if (currentUser.role === 'admin' || currentUser.role === 'director') return true;
+        return visibleUserIds.has(request.userId) || request.approvals.some((approval) => approval.approverId === currentUser.id);
       }),
-    [currentUser, isApprover, leaveRequests],
+    [currentUser, isApprover, leaveRequests, visibleUserIds],
   );
 
   const reimbursementVisibleToMe = useMemo(
@@ -613,18 +623,18 @@ export default function Approvals() {
       reimbursements.filter((request) => {
         if (!currentUser) return false;
         if (!isApprover) return request.userId === currentUser.id;
-        if (currentUser.role === 'admin') return true;
-        return request.approvals.some((approval) => approval.approverId === currentUser.id) || request.userId === currentUser.id;
+        if (currentUser.role === 'admin' || currentUser.role === 'director') return true;
+        return visibleUserIds.has(request.userId) || request.approvals.some((approval) => approval.approverId === currentUser.id);
       }),
-    [currentUser, isApprover, reimbursements],
+    [currentUser, isApprover, reimbursements, visibleUserIds],
   );
 
   const pendingLeavesForMe = leaveVisibleToMe.filter((request) =>
-    canActOnApproval(currentPendingApproval(request), currentUser?.id, currentUser?.role),
+    canActOnApproval(currentPendingApproval(request), currentUser?.id),
   );
 
   const pendingReimbursementsForMe = reimbursementVisibleToMe.filter((request) =>
-    canActOnApproval(currentPendingReimbursementApproval(request), currentUser?.id, currentUser?.role),
+    canActOnReimbursementApproval(currentPendingReimbursementApproval(request), currentUser?.id, currentUser?.role),
   );
 
   const visibleLeaves = statusTab === 'pending' ? pendingLeavesForMe : leaveVisibleToMe;
@@ -830,7 +840,7 @@ export default function Approvals() {
         <div className="space-y-3">
           {showLeaves && visibleLeaves.map((request) => {
             const pendingApproval = currentPendingApproval(request);
-            const isPendingForMe = canActOnApproval(pendingApproval, currentUser?.id, currentUser?.role);
+            const isPendingForMe = canActOnApproval(pendingApproval, currentUser?.id);
 
             return (
               <LeaveApprovalCard
@@ -847,7 +857,7 @@ export default function Approvals() {
 
           {showReimbursements && visibleReimbursements.map((request) => {
             const pendingApproval = currentPendingReimbursementApproval(request);
-            const isPendingForMe = canActOnApproval(pendingApproval, currentUser?.id, currentUser?.role);
+            const isPendingForMe = canActOnReimbursementApproval(pendingApproval, currentUser?.id, currentUser?.role);
 
             return (
               <ReimbursementApprovalCard

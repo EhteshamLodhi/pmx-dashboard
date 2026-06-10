@@ -17,6 +17,7 @@ import {
 } from '@/lib/attendance-analytics';
 import { getNonWorkingStatus } from '@/lib/attendance-calendar';
 import { downloadAttendanceSnapshot } from '@/lib/attendance-snapshot';
+import { getVisibleUsersForHierarchy } from '@/lib/hierarchy';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -52,6 +53,13 @@ function formatHours(record?: AttendanceRecord) {
   return `${Math.floor(diff / 60)}h ${diff % 60}m`;
 }
 
+function minutesFromTime(value?: string) {
+  if (!value) return null;
+  const [hours, minutes] = value.slice(0, 5).split(':').map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
 export default function AdminAttendance() {
   const { users, attendanceRecords, leaveRequests, holidays, updateAttendanceRecord, addAttendanceRecord, currentUser } = useApp();
   const { isPending, runAction } = useActionRunner();
@@ -73,7 +81,7 @@ export default function AdminAttendance() {
   });
   const [editError, setEditError] = useState<string | null>(null);
 
-  const activeEmployees = users.filter((user) => user.isActive);
+  const activeEmployees = currentUser ? getVisibleUsersForHierarchy(currentUser, users.filter((user) => user.isActive)) : [];
   const projects = Array.from(new Set(activeEmployees.map((user) => user.project ?? 'Unassigned')));
 
   useEffect(() => {
@@ -86,7 +94,7 @@ export default function AdminAttendance() {
   }, []);
 
   const rows = useMemo(() => {
-    return activeEmployees
+    const baseRows = activeEmployees
       .filter((user) => project === 'all' || (user.project ?? 'Unassigned') === project)
       .filter((user) => !deferredSearch || `${user.name} ${user.email} ${user.project ?? ''}`.toLowerCase().includes(deferredSearch.toLowerCase()))
       .map((user) => {
@@ -102,6 +110,12 @@ export default function AdminAttendance() {
         return { user, record, effectiveStatus };
       })
       .filter((row) => statusFilter === 'all' || row.effectiveStatus === statusFilter);
+    const ranks = new Map<string, number>();
+    baseRows
+      .filter(({ record }) => Boolean(record?.checkIn))
+      .sort((a, b) => (minutesFromTime(a.record?.checkIn) ?? 9999) - (minutesFromTime(b.record?.checkIn) ?? 9999))
+      .forEach((row, index) => ranks.set(row.user.id, index + 1));
+    return baseRows.map((row) => ({ ...row, rank: ranks.get(row.user.id) }));
   }, [activeEmployees, attendanceRecords, deferredSearch, holidays, leaveRequests, policy, project, selectedDate, statusFilter]);
 
   const summary = {
@@ -129,6 +143,7 @@ export default function AdminAttendance() {
         employeeName: user.name,
         position: user.position,
         project: user.project ?? 'Unassigned',
+        reportingTime: user.reportingTime,
         checkIn: record?.checkIn,
         checkOut: record?.checkOut,
         statusLabel: getStatusMeta(effectiveStatus).label,
@@ -223,7 +238,7 @@ export default function AdminAttendance() {
   };
   const savingEdit = editing ? isPending(`admin-attendance:${editing.user.id}:${editForm.date}`) : false;
 
-  const canViewAnalytics = currentUser?.role === 'admin' || currentUser?.role === 'director';
+  const canViewAnalytics = currentUser?.role === 'admin' || currentUser?.role === 'director' || currentUser?.role === 'manager';
   const canEditAttendance = currentUser?.role === 'admin';
 
   if (!canViewAnalytics) {
@@ -231,8 +246,8 @@ export default function AdminAttendance() {
       <div className="p-4 md:p-6 max-w-3xl mx-auto">
         <div className="bg-red-50 border border-red-100 rounded-2xl p-6 text-red-700">
           <Shield className="w-6 h-6 mb-2" />
-          <p className="font-semibold">Admin or director access required</p>
-          <p className="text-sm text-red-500 mt-1">Employees cannot access organization attendance analytics.</p>
+          <p className="font-semibold">Manager, director, or admin access required</p>
+          <p className="text-sm text-red-500 mt-1">Employees can view their own attendance from the Attendance screen.</p>
         </div>
       </div>
     );
@@ -464,7 +479,7 @@ export default function AdminAttendance() {
         </div>
 
         <div className="md:hidden divide-y divide-gray-50">
-          {rows.map(({ user, record, effectiveStatus }) => {
+          {rows.map(({ user, record, effectiveStatus, rank }) => {
             const meta = getStatusMeta(effectiveStatus);
             return (
               <div key={user.id} className={`${meta.row} p-4`}>
@@ -476,6 +491,14 @@ export default function AdminAttendance() {
                   <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${meta.badge}`}>{meta.label}</span>
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="rounded-xl bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-bold text-gray-400">REPORTING</p>
+                    <p className="text-sm font-semibold text-gray-800">{formatDisplayTime(user.reportingTime)}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/70 px-3 py-2">
+                    <p className="text-[10px] font-bold text-gray-400">RANK</p>
+                    <p className="text-sm font-semibold text-gray-800">{rank ?? 'NA'}</p>
+                  </div>
                   <div className="rounded-xl bg-white/70 px-3 py-2">
                     <p className="text-[10px] font-bold text-gray-400">CHECK IN</p>
                     <p className="text-sm font-semibold text-gray-800">{formatDisplayTime(record?.checkIn)}</p>
@@ -506,26 +529,34 @@ export default function AdminAttendance() {
             <thead className="bg-gray-50 text-gray-400 uppercase text-[11px] tracking-wide">
               <tr>
                 <th className="text-left px-4 py-3 font-bold">Employee Name</th>
-                <th className="text-left px-4 py-3 font-bold">Project</th>
                 <th className="text-left px-4 py-3 font-bold">Reporting Time</th>
-                <th className="text-left px-4 py-3 font-bold">Closing Time</th>
+                <th className="text-left px-4 py-3 font-bold">Check-In Time</th>
+                <th className="text-left px-4 py-3 font-bold">Ranking</th>
+                <th className="text-left px-4 py-3 font-bold">Check-Out Time</th>
                 <th className="text-left px-4 py-3 font-bold">Hours</th>
                 <th className="text-left px-4 py-3 font-bold">Status</th>
                 <th className="text-right px-4 py-3 font-bold">Edit</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {rows.map(({ user, record, effectiveStatus }) => {
+              {rows.map(({ user, record, effectiveStatus, rank }) => {
                 const status = effectiveStatus;
                 const meta = getStatusMeta(status);
                 return (
                   <tr key={user.id} className={`${meta.row} hover:bg-green-50 transition-colors`}>
                     <td className="px-4 py-3">
                       <div className="font-semibold text-gray-900">{user.name}</div>
-                      <div className="text-xs text-gray-500">{user.email}</div>
+                      <div className="text-xs text-gray-500">{user.project ?? 'Unassigned'} - {user.email}</div>
                     </td>
-                    <td className="px-4 py-3 text-gray-700">{user.project ?? 'Unassigned'}</td>
+                    <td className="px-4 py-3 tabular-nums text-gray-700 font-semibold">{formatDisplayTime(user.reportingTime)}</td>
                     <td className="px-4 py-3 tabular-nums text-gray-700">{formatDisplayTime(record?.checkIn)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex min-w-8 justify-center rounded-lg px-2 py-1 text-xs font-bold ${
+                        rank ? (rank <= 3 ? 'bg-green-100 text-green-700' : rank <= 7 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700') : 'bg-gray-100 text-gray-400'
+                      }`}>
+                        {rank ?? 'NA'}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 tabular-nums text-gray-700">{formatDisplayTime(record?.checkOut)}</td>
                     <td className="px-4 py-3 tabular-nums text-gray-700">{formatHours(record)}</td>
                     <td className="px-4 py-3">

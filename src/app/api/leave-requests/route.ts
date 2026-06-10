@@ -248,8 +248,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Approval workflow step was not found.' }, { status: 404 });
   }
 
-  const isAdmin = actor.role === 'admin';
-  if (!isAdmin && workflow.approver_id !== authResult.user.id) {
+  if (workflow.approver_id !== authResult.user.id) {
     return NextResponse.json({ error: 'You are not assigned to this approval step.' }, { status: 403 });
   }
 

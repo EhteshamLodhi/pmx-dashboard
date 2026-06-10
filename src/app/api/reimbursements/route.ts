@@ -40,12 +40,48 @@ function selectQuery() {
 async function getActor(admin: ReturnType<typeof createAdminClient>, userId: string) {
   const { data, error } = await admin
     .from('users')
-    .select('id, full_name, role, line_manager_id, director_id, project:project_id(name)')
+    .select('id, full_name, role, line_manager_id, project_manager_id, director_id, project:project_id(name)')
     .eq('id', userId)
     .maybeSingle();
 
   if (error || !data) return null;
   return data as any;
+}
+
+async function getVisibleUserIdsForActor(admin: ReturnType<typeof createAdminClient>, actor: any) {
+  if (actor.role === 'admin' || actor.role === 'director') return null;
+  if (actor.role === 'employee') return [actor.id];
+
+  const { data, error } = await admin
+    .from('users')
+    .select('id, line_manager_id, project_manager_id')
+    .eq('is_active', true);
+
+  if (error) throw error;
+
+  const users = data ?? [];
+  const visible = new Set<string>([actor.id]);
+  users
+    .filter((user) => user.line_manager_id === actor.id)
+    .forEach((user) => visible.add(user.id));
+  const projectVisible = new Set<string>();
+  users
+    .filter((user) => user.project_manager_id === actor.id)
+    .forEach((user) => projectVisible.add(user.id));
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    users.forEach((user) => {
+      if (!projectVisible.has(user.id) && user.line_manager_id && projectVisible.has(user.line_manager_id)) {
+        projectVisible.add(user.id);
+        changed = true;
+      }
+    });
+  }
+  projectVisible.forEach((id) => visible.add(id));
+
+  return Array.from(visible);
 }
 
 async function fetchRequest(admin: ReturnType<typeof createAdminClient>, reimbursementId: string) {
@@ -89,8 +125,9 @@ export async function GET() {
     .select(selectQuery())
     .order('created_at', { ascending: false });
 
-  if (actor.role === 'employee') {
-    query = query.eq('employee_id', actor.id);
+  const visibleUserIds = await getVisibleUserIdsForActor(admin, actor);
+  if (visibleUserIds) {
+    query = query.in('employee_id', visibleUserIds);
   }
 
   const { data, error } = await query;
@@ -124,9 +161,9 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
   const actor = await getActor(admin, authResult.user.id);
   if (!actor) return NextResponse.json({ error: 'User profile is not configured.' }, { status: 400 });
-  if (!actor.line_manager_id || !actor.director_id) {
+  if (!actor.line_manager_id) {
     return NextResponse.json(
-      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a line manager and director.' },
+      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a line manager.' },
       { status: 400 },
     );
   }
@@ -178,13 +215,6 @@ export async function POST(request: Request) {
       approval_level: 1,
       approver_id: actor.line_manager_id,
       approver_role: 'Line Manager',
-      status: 'pending',
-    },
-    {
-      reimbursement_id: created.id,
-      approval_level: 2,
-      approver_id: actor.director_id,
-      approver_role: 'Director',
       status: 'pending',
     },
   ];
@@ -340,7 +370,7 @@ export async function PATCH(request: Request) {
       .from('reimbursement_approvals')
       .upsert({
         reimbursement_id: reimbursementId,
-        approval_level: 3,
+        approval_level: 2,
         approver_id: actor.id,
         approver_role: 'Finance/Admin',
         status: 'approved',
@@ -362,12 +392,58 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ data: await fetchRequest(admin, reimbursementId) });
   }
 
+  if (action === 'remaining') {
+    if (actor.role !== 'admin') return NextResponse.json({ error: 'Only admins can mark reimbursements as remaining.' }, { status: 403 });
+
+    const { data: reimbursement } = await admin
+      .from('reimbursement_requests')
+      .select('employee_id, request_number')
+      .eq('id', reimbursementId)
+      .maybeSingle();
+
+    await admin.from('reimbursement_payments').delete().eq('reimbursement_id', reimbursementId);
+    const { error: updateError } = await admin
+      .from('reimbursement_requests')
+      .update({ status: 'approved', updated_by: actor.id })
+      .eq('id', reimbursementId);
+
+    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 400 });
+
+    await admin
+      .from('reimbursement_approvals')
+      .upsert({
+        reimbursement_id: reimbursementId,
+        approval_level: 2,
+        approver_id: actor.id,
+        approver_role: 'Finance/Admin',
+        status: 'pending',
+        comment: 'Marked as remaining / pending payment',
+        acted_at: null,
+      }, { onConflict: 'reimbursement_id,approval_level' });
+
+    if (reimbursement) {
+      await tryCreateNotification(admin, {
+        userId: reimbursement.employee_id,
+        category: 'reimbursement',
+        title: 'Reimbursement pending payment',
+        message: `Your reimbursement ${reimbursement.request_number} is marked as remaining / pending payment.`,
+        link: '/reimbursements',
+        sourceKey: `reimbursement-remaining:${reimbursementId}:employee`,
+      });
+    }
+
+    return NextResponse.json({ data: await fetchRequest(admin, reimbursementId) });
+  }
+
   if (action === 'approval') {
-    const level = Number(body.level) as 1 | 2;
+    const level = Number(body.level) as 1;
     const decision = String(body.decision ?? '');
     const comment = String(body.comment ?? '').trim();
-    if (![1, 2].includes(level) || !['approved', 'rejected', 'more_info'].includes(decision)) {
+    if (level !== 1 || !['approved', 'rejected', 'more_info'].includes(decision)) {
       return NextResponse.json({ error: 'Invalid reimbursement approval payload.' }, { status: 400 });
+    }
+    if (actor.role !== 'manager') {
+      return NextResponse.json({ error: 'Only the assigned manager can approve or reject reimbursements.' }, { status: 403 });
     }
     if ((decision === 'rejected' || decision === 'more_info') && !comment) {
       return NextResponse.json({ error: 'Comments are required for rejection or more information requests.' }, { status: 400 });
@@ -395,9 +471,7 @@ export async function PATCH(request: Request) {
 
     const nextStatus =
       decision === 'approved'
-        ? level === 1
-          ? 'pending_director'
-          : 'approved'
+        ? 'approved'
         : decision === 'rejected'
           ? 'rejected'
           : 'more_info';
@@ -426,21 +500,15 @@ export async function PATCH(request: Request) {
       .update({ status: nextStatus, decided_at: ['approved', 'rejected'].includes(nextStatus) ? actedAt : null, updated_by: actor.id })
       .eq('id', reimbursementId);
 
-    if (reimbursement && decision === 'approved' && level === 1) {
-      const directorId = reimbursement.employee?.director_id;
-      if (directorId) {
-        await tryCreateNotification(admin, {
-          userId: directorId,
-          category: 'approval',
-          title: 'Director reimbursement approval pending',
-          message: `Reimbursement request from ${reimbursement.employee?.full_name ?? 'an employee'} is awaiting your approval.`,
-          link: '/reimbursements',
-          sourceKey: `reimbursement-manager-approved:${reimbursementId}:director`,
-        });
-      }
+    if (decision === 'approved') {
+      await admin
+        .from('reimbursement_approvals')
+        .delete()
+        .eq('reimbursement_id', reimbursementId)
+        .gt('approval_level', 1);
     }
 
-    if (reimbursement && decision === 'approved' && level === 2) {
+    if (reimbursement && decision === 'approved') {
       await tryCreateRoleNotification(admin, ['admin'], {
         category: 'reimbursement',
         title: 'Reimbursement awaiting payment',
@@ -450,7 +518,7 @@ export async function PATCH(request: Request) {
       });
     }
 
-    if (reimbursement && (decision === 'rejected' || decision === 'more_info' || level === 2)) {
+    if (reimbursement) {
       await tryCreateNotification(admin, {
         userId: reimbursement.employee_id,
         category: 'reimbursement',

@@ -90,6 +90,13 @@ function getDuration(checkIn?: string, checkOut?: string) {
   return `${Math.floor(diff / 60)}h ${diff % 60}m`;
 }
 
+function minutesFromTime(value?: string) {
+  if (!value) return null;
+  const [hours, minutes] = value.slice(0, 5).split(':').map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
 // ─── Admin Daily Attendance Board ──────────────────────────────────────────────
 function AdminDailyBoard() {
   const { users, attendanceRecords } = useApp();
@@ -161,8 +168,9 @@ function AdminDailyBoard() {
       <div className="grid grid-cols-12 gap-0 px-4 py-2 border-b border-gray-100 bg-gray-50">
         {[
           { label: 'Employee', span: 'col-span-4' },
-          { label: 'Project', span: 'col-span-3' },
+          { label: 'Reporting', span: 'col-span-2 text-center' },
           { label: 'Check In', span: 'col-span-2 text-center' },
+          { label: 'Rank', span: 'col-span-1 text-center' },
           { label: 'Check Out', span: 'col-span-2 text-center' },
           { label: 'Status', span: 'col-span-1 text-center' },
         ].map((col) => (
@@ -271,7 +279,7 @@ function getBoardRows(users: User[], attendanceRecords: AttendanceRecord[], sele
   const activeUsers = users.filter((user) => user.isActive);
   const dateRecords = attendanceRecords.filter((record) => record.date === selectedDate);
 
-  return activeUsers.map((user) => {
+  const rows = activeUsers.map((user) => {
     const record = dateRecords.find((item) => item.userId === user.id);
     const status = (record?.status ?? 'absent') as AttendanceStatus | 'absent';
     const badge = getStatusBadge(status);
@@ -284,6 +292,7 @@ function getBoardRows(users: User[], attendanceRecords: AttendanceRecord[], sele
         employeeName: user.name,
         position: user.position,
         project: user.project ?? 'Unassigned',
+        reportingTime: user.reportingTime,
         checkIn: record?.checkIn,
         checkOut: record?.checkOut,
         statusLabel: badge.label,
@@ -291,6 +300,14 @@ function getBoardRows(users: User[], attendanceRecords: AttendanceRecord[], sele
       } satisfies AttendanceSnapshotRow,
     };
   });
+
+  const ranks = new Map<string, number>();
+  rows
+    .filter(({ record }) => Boolean(record?.checkIn))
+    .sort((a, b) => (minutesFromTime(a.record?.checkIn) ?? 9999) - (minutesFromTime(b.record?.checkIn) ?? 9999))
+    .forEach((row, index) => ranks.set(row.user.id, index + 1));
+
+  return rows.map((row) => ({ ...row, rank: ranks.get(row.user.id) }));
 }
 
 function getBoardSummary(rows: ReturnType<typeof getBoardRows>) {
@@ -374,7 +391,7 @@ function DynamicAdminDailyBoard({
       </div>
 
       <div className="hidden md:block divide-y divide-gray-50">
-        {rows.map(({ user, record, badge }, idx) => {
+        {rows.map(({ user, record, badge, rank }, idx) => {
           const duration = getDuration(record?.checkIn, record?.checkOut);
           return (
             <div
@@ -392,12 +409,19 @@ function DynamicAdminDailyBoard({
                   <p className="text-gray-400 truncate" style={{ fontSize: '11px' }}>{user.position}</p>
                 </div>
               </div>
-              <div className="col-span-3">
-                <p className="text-gray-600 truncate" style={{ fontSize: '12px' }}>{user.project ?? 'Unassigned'}</p>
+              <div className="col-span-2 text-center">
+                <p className="text-gray-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 700 }}>{formatDisplayTime(user.reportingTime)}</p>
               </div>
               <div className="col-span-2 text-center">
                 <span className="text-green-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 600 }}>
                   {formatDisplayTime(record?.checkIn)}
+                </span>
+              </div>
+              <div className="col-span-1 text-center">
+                <span className={`inline-flex min-w-7 justify-center rounded-lg px-2 py-1 text-xs font-bold ${
+                  rank ? (rank <= 3 ? 'bg-green-100 text-green-700' : rank <= 7 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700') : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {rank ?? 'NA'}
                 </span>
               </div>
               <div className="col-span-2 text-center">
@@ -423,7 +447,7 @@ function DynamicAdminDailyBoard({
       </div>
 
       <div className="md:hidden divide-y divide-gray-50">
-        {rows.map(({ user, record, badge }) => (
+        {rows.map(({ user, record, badge, rank }) => (
           <div key={user.id} className="px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3 min-w-0">
@@ -442,6 +466,14 @@ function DynamicAdminDailyBoard({
               </span>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl bg-gray-50 px-3 py-2">
+                <p className="text-gray-400" style={{ fontSize: '10px', fontWeight: 700 }}>REPORTING</p>
+                <p className="text-gray-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 700 }}>{formatDisplayTime(user.reportingTime)}</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 px-3 py-2">
+                <p className="text-gray-400" style={{ fontSize: '10px', fontWeight: 700 }}>RANK</p>
+                <p className="text-gray-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 700 }}>{rank ?? 'NA'}</p>
+              </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2">
                 <p className="text-gray-400" style={{ fontSize: '10px', fontWeight: 700 }}>CHECK IN</p>
                 <p className="text-green-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 700 }}>{formatDisplayTime(record?.checkIn)}</p>
@@ -843,7 +875,7 @@ export default function Dashboard() {
                 path: '/admin/users',
               },
               {
-                label: 'Edit Attendance',
+                label: 'Attendance Report',
                 description: 'Correct records',
                 icon: Clock,
                 bg: 'bg-amber-50',

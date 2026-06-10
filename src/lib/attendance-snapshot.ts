@@ -4,6 +4,7 @@ export type AttendanceSnapshotRow = {
   employeeName: string;
   position?: string;
   project?: string;
+  reportingTime?: string;
   checkIn?: string;
   checkOut?: string;
   statusLabel: string;
@@ -56,6 +57,29 @@ function drawText(context: CanvasRenderingContext2D, text: string, x: number, y:
   context.fillText(value, x, y);
 }
 
+function minutesFromTime(value?: string) {
+  if (!value) return null;
+  const [hours, minutes] = value.slice(0, 5).split(':').map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
+function rankColor(rank?: number | null) {
+  if (!rank) return '#F8FAFC';
+  if (rank <= 3) return '#86D18B';
+  if (rank <= 7) return '#FDE68A';
+  return '#FDA4AF';
+}
+
+function timeCellColor(row: AttendanceSnapshotRow, key: 'checkIn' | 'checkOut') {
+  if (row.status === 'absent') return '#FCA5A5';
+  if (row.status === 'on-leave' || row.status === 'holiday' || row.status === 'weekly-off') return '#E5E7EB';
+  if (key === 'checkIn' && row.status === 'late') return '#FDBA74';
+  if (key === 'checkOut' && row.checkOut) return '#FCA5A5';
+  if (key === 'checkOut' && row.checkIn && !row.checkOut) return '#FDE68A';
+  return '#FFFFFF';
+}
+
 export function downloadAttendanceSnapshot(options: {
   dateLabel: string;
   generatedAt: string;
@@ -63,13 +87,12 @@ export function downloadAttendanceSnapshot(options: {
   summary: AttendanceSnapshotSummary;
 }) {
   const width = 1080;
-  const rowHeight = 132;
+  const rowHeight = 58;
   const visibleRows = options.rows;
-  const headerHeight = 218;
-  const summaryTop = 246;
-  const summaryHeight = 244;
-  const listTop = summaryTop + summaryHeight + 26;
-  const height = listTop + visibleRows.length * rowHeight + 44;
+  const headerHeight = 156;
+  const summaryTop = 192;
+  const tableTop = 302;
+  const height = tableTop + 54 + visibleRows.length * rowHeight + 46;
   const scale = 2;
   const canvas = document.createElement('canvas');
   canvas.width = width * scale;
@@ -81,30 +104,30 @@ export function downloadAttendanceSnapshot(options: {
   context.fillStyle = '#F8FAFC';
   context.fillRect(0, 0, width, height);
 
-  context.fillStyle = '#049A3B';
-  roundRect(context, 28, 24, width - 56, headerHeight, 26);
+  context.fillStyle = '#0B8F3B';
+  roundRect(context, 24, 22, width - 48, headerHeight, 22);
   context.fill();
 
   context.fillStyle = 'rgba(255,255,255,0.18)';
-  roundRect(context, 58, 56, 70, 70, 18);
+  roundRect(context, 54, 54, 62, 62, 16);
   context.fill();
   context.fillStyle = '#FFFFFF';
-  context.font = '700 44px Arial';
-  context.fillText('P', 84, 105);
+  context.font = '700 40px Arial';
+  context.fillText('P', 77, 99);
 
-  context.font = '700 38px Arial';
-  context.fillText('PowerMatix', 150, 84);
-  context.font = '700 22px Arial';
+  context.font = '700 34px Arial';
+  context.fillText('PowerMatix', 136, 78);
+  context.font = '700 20px Arial';
   context.fillStyle = '#D4F8DF';
-  context.fillText('DAILY ATTENDANCE REPORT', 150, 118);
+  context.fillText('DAILY ATTENDANCE REPORT', 136, 110);
 
   context.fillStyle = '#FFFFFF';
-  context.font = '700 26px Arial';
+  context.font = '700 25px Arial';
   context.textAlign = 'right';
-  context.fillText(options.dateLabel, width - 58, 82);
+  context.fillText(options.dateLabel, width - 54, 78);
   context.fillStyle = '#D4F8DF';
-  context.font = '600 19px Arial';
-  context.fillText(`Auto-generated - ${options.generatedAt}`, width - 58, 114);
+  context.font = '600 18px Arial';
+  context.fillText(`Auto-generated - ${options.generatedAt}`, width - 54, 110);
   context.textAlign = 'left';
 
   const summaryCards = [
@@ -116,70 +139,87 @@ export function downloadAttendanceSnapshot(options: {
   ] as const;
 
   summaryCards.forEach(([label, value, color], index) => {
-    const cardWidth = index === 4 ? width - 72 : (width - 96) / 2;
-    const x = 36 + (index % 2) * (cardWidth + 24);
-    const actualY = summaryTop + Math.floor(index / 2) * 78;
-    context.fillStyle = '#FFFFFF';
-    roundRect(context, x, actualY, cardWidth, 64, 18);
+    const cardWidth = 190;
+    const x = 36 + index * 204;
+    context.fillStyle = index === 4 ? '#111827' : '#FFFFFF';
+    roundRect(context, x, summaryTop, cardWidth, 74, 16);
     context.fill();
     context.fillStyle = color;
-    context.font = '700 30px Arial';
-    context.fillText(String(value), x + 22, actualY + 42);
-    context.fillStyle = '#475569';
-    context.font = '700 20px Arial';
-    context.fillText(label, x + 86, actualY + 39);
+    context.font = '700 31px Arial';
+    context.fillText(String(value), x + 18, summaryTop + 45);
+    context.fillStyle = index === 4 ? '#FFFFFF' : '#475569';
+    context.font = '700 17px Arial';
+    drawText(context, label, x + 72, summaryTop + 43, cardWidth - 84);
   });
 
-  context.fillStyle = '#334155';
-  context.font = '700 24px Arial';
-  context.fillText('Employee Attendance', 40, listTop - 12);
+  const rankedRows = new Map<number, number>();
+  visibleRows
+    .map((row, index) => ({ row, index, minutes: minutesFromTime(row.checkIn) }))
+    .filter((item): item is { row: AttendanceSnapshotRow; index: number; minutes: number } => item.minutes !== null)
+    .sort((a, b) => a.minutes - b.minutes)
+    .forEach((item, index) => rankedRows.set(item.index, index + 1));
+
+  const columns = [
+    { label: 'Name', x: 24, width: 292 },
+    { label: 'Cut Off Arrival Time', x: 316, width: 188 },
+    { label: options.dateLabel.split(',').at(0) ?? 'Check In', x: 504, width: 188 },
+    { label: 'Ranking', x: 692, width: 132 },
+    { label: 'Check Out', x: 824, width: 232 },
+  ];
+
+  context.fillStyle = '#135F7B';
+  context.fillRect(24, tableTop, width - 48, 54);
+  context.fillStyle = '#FFFFFF';
+  context.font = '700 18px Arial';
+  columns.forEach((column) => {
+    context.textAlign = column.label === 'Name' ? 'left' : 'center';
+    const textX = column.label === 'Name' ? column.x + 12 : column.x + column.width / 2;
+    drawText(context, column.label, textX, tableTop + 34, column.width - 18);
+  });
+  context.textAlign = 'left';
 
   visibleRows.forEach((row, index) => {
-    const y = listTop + index * rowHeight;
-    context.fillStyle = '#FFFFFF';
-    roundRect(context, 36, y, width - 72, rowHeight - 16, 22);
-    context.fill();
+    const y = tableTop + 54 + index * rowHeight;
+    const rank = rankedRows.get(index);
+    const checkOutValue = row.checkOut ? formatDisplayTime(row.checkOut) : row.checkIn ? 'Active' : 'NA';
+    const checkInValue = row.checkIn ? formatDisplayTime(row.checkIn) : row.status === 'on-leave' ? 'Leave' : 'NA';
 
-    context.fillStyle = '#F1F5F9';
-    roundRect(context, 58, y + 26, 62, 62, 31);
-    context.fill();
-    context.fillStyle = '#64748B';
-    context.font = '700 20px Arial';
-    const initials = row.employeeName
-      .split(' ')
-      .map((part) => part[0])
-      .join('')
-      .slice(0, 2)
-      .toUpperCase();
-    context.textAlign = 'center';
-    context.fillText(initials, 89, y + 65);
-    context.textAlign = 'left';
+    context.fillStyle = index % 2 === 0 ? '#F8FAFC' : '#E0F2FE';
+    context.fillRect(24, y, width - 48, rowHeight);
+    context.strokeStyle = '#111827';
+    context.lineWidth = 1;
 
-    context.fillStyle = '#111827';
-    context.font = '700 27px Arial';
-    drawText(context, row.employeeName, 142, y + 42, 430);
-    context.fillStyle = '#94A3B8';
-    context.font = '600 19px Arial';
-    drawText(context, `${row.position ?? 'Employee'} - ${row.project ?? 'Unassigned'}`, 142, y + 72, 560);
+    columns.forEach((column) => {
+      context.strokeRect(column.x, y, column.width, rowHeight);
+    });
 
-    const status = row.statusLabel;
-    const statusWidth = Math.max(116, context.measureText(status).width + 46);
-    context.fillStyle = `${statusColor(row.status)}18`;
-    roundRect(context, width - 60 - statusWidth, y + 28, statusWidth, 42, 21);
-    context.fill();
-    context.fillStyle = statusColor(row.status);
-    context.beginPath();
-    context.arc(width - 42 - statusWidth, y + 49, 8, 0, Math.PI * 2);
-    context.fill();
-    context.font = '700 20px Arial';
-    context.fillText(status, width - 28 - statusWidth, y + 56);
-
-    context.fillStyle = '#038C3E';
+    context.fillStyle = '#0F172A';
     context.font = '700 21px Arial';
-    context.fillText(`In: ${formatDisplayTime(row.checkIn)}`, 142, y + 104);
+    context.textAlign = 'left';
+    drawText(context, row.employeeName, columns[0].x + 12, y + 36, columns[0].width - 20);
 
-    context.fillStyle = row.checkOut ? '#1D4ED8' : '#F97316';
-    context.fillText(`Out: ${row.checkOut ? formatDisplayTime(row.checkOut) : row.checkIn ? 'Active' : '-'}`, 420, y + 104);
+    context.fillStyle = '#FFFFFF';
+    context.fillRect(columns[1].x + 1, y + 1, columns[1].width - 2, rowHeight - 2);
+    context.fillStyle = '#111827';
+    context.font = '700 20px Arial';
+    context.textAlign = 'center';
+    context.fillText(formatDisplayTime(row.reportingTime), columns[1].x + columns[1].width / 2, y + 36);
+
+    context.fillStyle = timeCellColor(row, 'checkIn');
+    context.fillRect(columns[2].x + 1, y + 1, columns[2].width - 2, rowHeight - 2);
+    context.fillStyle = '#111827';
+    context.fillText(checkInValue, columns[2].x + columns[2].width / 2, y + 36);
+
+    context.fillStyle = rankColor(rank);
+    context.fillRect(columns[3].x + 1, y + 1, columns[3].width - 2, rowHeight - 2);
+    context.fillStyle = '#111827';
+    context.fillText(rank ? String(rank) : 'NA', columns[3].x + columns[3].width / 2, y + 36);
+
+    context.fillStyle = timeCellColor(row, 'checkOut');
+    context.fillRect(columns[4].x + 1, y + 1, columns[4].width - 2, rowHeight - 2);
+    context.fillStyle = row.checkOut || !row.checkIn ? '#111827' : '#C2410C';
+    context.fillText(checkOutValue, columns[4].x + columns[4].width / 2, y + 36);
+    context.textAlign = 'left';
   });
 
   if (options.rows.length > visibleRows.length) {

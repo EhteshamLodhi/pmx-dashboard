@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const CHECKOUT_REMINDER_AFTER_HOURS = 9;
+const CHECKIN_REMINDER_AFTER_MINUTES = 30;
+const REMINDER_REPEAT_MINUTES = 30;
 const AUTO_CLOSE_REMARK = 'Auto-closed by reminder engine after missing check-out.';
 
 function minutesFromTime(value: string) {
@@ -31,11 +33,11 @@ function currentMinutes() {
 }
 
 function reminderRoundByMinutes(nowMinutes: number, thresholdMinutes: number) {
-  return Math.max(0, Math.floor((nowMinutes - thresholdMinutes) / 60));
+  return Math.max(0, Math.floor((nowMinutes - thresholdMinutes) / REMINDER_REPEAT_MINUTES));
 }
 
 function reminderRoundByTimestamp(currentTimestamp: number, thresholdTimestamp: number) {
-  return Math.max(0, Math.floor((currentTimestamp - thresholdTimestamp) / 3_600_000));
+  return Math.max(0, Math.floor((currentTimestamp - thresholdTimestamp) / (REMINDER_REPEAT_MINUTES * 60_000)));
 }
 
 function localDateTimeToUtc(date: string, time: string) {
@@ -43,6 +45,12 @@ function localDateTimeToUtc(date: string, time: string) {
   const [hours, minutes] = time.split(':').map(Number);
   const offsetMinutes = Number(process.env.APP_TIMEZONE_OFFSET_MINUTES ?? '300');
   return new Date(Date.UTC(year, month - 1, day, hours, minutes) - offsetMinutes * 60_000);
+}
+
+function localDateMinutesToUtc(date: string, minutesFromMidnight: number) {
+  const [year, month, day] = date.split('-').map(Number);
+  const offsetMinutes = Number(process.env.APP_TIMEZONE_OFFSET_MINUTES ?? '300');
+  return new Date(Date.UTC(year, month - 1, day, 0, minutesFromMidnight) - offsetMinutes * 60_000);
 }
 
 function resolvedAutoCheckoutTimestamp(workDate: string, checkInAt: string) {
@@ -112,7 +120,6 @@ async function runReminderJob(request: Request) {
 
   if (settingsError) return reminderResponse({ error: settingsError.message }, 500);
 
-  const graceMinutes = settings?.check_in_grace_minutes ?? 15;
   const policy = {
     weeklyOffDays: settings?.weekly_off_days ?? ['saturday', 'sunday'],
   } as PolicySettings;
@@ -201,15 +208,14 @@ async function runReminderJob(request: Request) {
   );
   const checkInNotifications = eligibleReminderUsers
     .flatMap((user) => {
-      const userGraceMinutes = user.check_in_grace_minutes ?? graceMinutes;
-      const threshold = minutesFromTime(user.reporting_time ?? '09:00') + userGraceMinutes;
+      const threshold = minutesFromTime(user.reporting_time ?? '09:00') + CHECKIN_REMINDER_AFTER_MINUTES;
       const record = attendanceByUser.get(user.id);
       if (!(nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave')) return [];
       const round = reminderRoundByMinutes(nowMinutes, threshold);
       return [{
         userId: user.id,
         category: 'attendance' as const,
-        title: round === 0 ? 'Check-in reminder' : 'Hourly check-in reminder',
+        title: round === 0 ? 'Check-in reminder' : 'Check-in reminder',
         message: round === 0
           ? 'You have not checked in today.'
           : 'You still have not checked in today. Please mark your attendance.',
@@ -220,15 +226,14 @@ async function runReminderJob(request: Request) {
 
   const managerCheckInNotifications = eligibleReminderUsers
     .flatMap((user) => {
-      const userGraceMinutes = user.check_in_grace_minutes ?? graceMinutes;
-      const threshold = minutesFromTime(user.reporting_time ?? '09:00') + userGraceMinutes;
+      const threshold = minutesFromTime(user.reporting_time ?? '09:00') + CHECKIN_REMINDER_AFTER_MINUTES;
       const record = attendanceByUser.get(user.id);
       if (!(nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave')) return [];
       const round = reminderRoundByMinutes(nowMinutes, threshold);
       return hierarchyRecipients(user).map((recipientId) => ({
         userId: recipientId,
         category: 'attendance' as const,
-        title: round === 0 ? 'Employee check-in reminder' : 'Employee hourly check-in reminder',
+        title: round === 0 ? 'Employee check-in reminder' : 'Employee check-in reminder',
         message: `${user.full_name} has not checked in today.`,
         link: '/admin/attendance',
         sourceKey: `manager-check-in-reminder:${workDate}:${user.id}:${recipientId}:${round}`,
@@ -239,16 +244,16 @@ async function runReminderJob(request: Request) {
     .flatMap((user) => {
       const record = attendanceByUser.get(user.id);
       if (!(record?.check_in_at && !record?.check_out_at)) return [];
-      const thresholdTimestamp = new Date(record.check_in_at).getTime() + CHECKOUT_REMINDER_AFTER_HOURS * 3_600_000;
+      const thresholdMinutes = minutesFromTime(user.reporting_time ?? '09:00') + CHECKOUT_REMINDER_AFTER_HOURS * 60;
+      if (thresholdMinutes > 23 * 60 + 59) return [];
+      const thresholdTimestamp = localDateMinutesToUtc(workDate, thresholdMinutes).getTime();
       if (nowTimestamp < thresholdTimestamp) return [];
       const round = reminderRoundByTimestamp(nowTimestamp, thresholdTimestamp);
       return [{
         userId: user.id,
         category: 'attendance' as const,
-        title: round === 0 ? 'Check-out reminder' : 'Hourly check-out reminder',
-        message: round === 0
-          ? 'You have completed 9 hours from your check-in time. Please mark your check-out.'
-          : 'You are still checked in more than 9 hours after arrival. Please mark your check-out when you leave.',
+        title: round === 0 ? 'Check-out reminder' : 'Check-out reminder',
+        message: 'You have not checked out today.',
         link: '/attendance',
         sourceKey: `check-out:${workDate}:${user.id}:${round}`,
       }];
@@ -258,14 +263,16 @@ async function runReminderJob(request: Request) {
     .flatMap((user) => {
       const record = attendanceByUser.get(user.id);
       if (!(record?.check_in_at && !record?.check_out_at)) return [];
-      const thresholdTimestamp = new Date(record.check_in_at).getTime() + CHECKOUT_REMINDER_AFTER_HOURS * 3_600_000;
+      const thresholdMinutes = minutesFromTime(user.reporting_time ?? '09:00') + CHECKOUT_REMINDER_AFTER_HOURS * 60;
+      if (thresholdMinutes > 23 * 60 + 59) return [];
+      const thresholdTimestamp = localDateMinutesToUtc(workDate, thresholdMinutes).getTime();
       if (nowTimestamp < thresholdTimestamp) return [];
       const round = reminderRoundByTimestamp(nowTimestamp, thresholdTimestamp);
       return hierarchyRecipients(user).map((recipientId) => ({
         userId: recipientId,
         category: 'attendance' as const,
-        title: round === 0 ? 'Employee check-out reminder' : 'Employee hourly check-out reminder',
-        message: `${user.full_name} is still checked in more than 9 hours after arrival and has not checked out yet.`,
+        title: round === 0 ? 'Employee check-out reminder' : 'Employee check-out reminder',
+        message: `${user.full_name} has not checked out today.`,
         link: '/admin/attendance',
         sourceKey: `manager-check-out-reminder:${workDate}:${user.id}:${recipientId}:${round}`,
       }));

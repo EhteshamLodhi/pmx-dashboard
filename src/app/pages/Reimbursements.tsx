@@ -55,13 +55,13 @@ function statusBadge(status: ReimbursementRequest['status']) {
     case 'paid':
       return { label: 'Paid', cls: 'bg-green-100 text-green-700', icon: CheckCircle2 };
     case 'approved':
-      return { label: 'Approved', cls: 'bg-emerald-100 text-emerald-700', icon: CheckCircle2 };
+      return { label: 'Remaining / Pending Payment', cls: 'bg-emerald-100 text-emerald-700', icon: CheckCircle2 };
     case 'rejected':
       return { label: 'Rejected', cls: 'bg-red-100 text-red-700', icon: XCircle };
     case 'pending_manager':
       return { label: 'Pending Manager', cls: 'bg-yellow-100 text-yellow-700', icon: Clock };
     case 'pending_director':
-      return { label: 'Pending Director', cls: 'bg-orange-100 text-orange-700', icon: Clock };
+      return { label: 'Pending Payment', cls: 'bg-orange-100 text-orange-700', icon: Clock };
     case 'more_info':
       return { label: 'More Info', cls: 'bg-blue-100 text-blue-700', icon: FileText };
     case 'cancelled':
@@ -148,6 +148,7 @@ export default function Reimbursements() {
   const [deleteTarget, setDeleteTarget] = useState<ReimbursementRequest | null>(null);
   const [actionTarget, setActionTarget] = useState<{ request: ReimbursementRequest; decision: 'approved' | 'rejected' | 'more_info' } | null>(null);
   const [paymentTarget, setPaymentTarget] = useState<ReimbursementRequest | null>(null);
+  const [remainingTarget, setRemainingTarget] = useState<ReimbursementRequest | null>(null);
   const [comment, setComment] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [categoryDraft, setCategoryDraft] = useState('');
@@ -159,7 +160,9 @@ export default function Reimbursements() {
   });
 
   const isAdmin = currentUser?.role === 'admin';
-  const isApprover = ['manager', 'director', 'admin'].includes(currentUser?.role ?? '');
+  const isDirector = currentUser?.role === 'director';
+  const isManager = currentUser?.role === 'manager';
+  const canViewQueue = isManager || isDirector || isAdmin;
 
   const load = async () => {
     const response = await fetch('/api/reimbursements', { credentials: 'include' });
@@ -190,18 +193,18 @@ export default function Reimbursements() {
       requests.filter((request) => {
         const pending = pendingApproval(request);
         if (!pending || !currentUser) return false;
-        return currentUser.role === 'admin' || pending.approverId === currentUser.id;
+        return currentUser.role === 'manager' && pending.approverId === currentUser.id;
       }),
     [currentUser, requests],
   );
 
-  const paymentQueue = requests.filter((request) => request.status === 'approved');
-  const totalPaid = requests.filter((request) => request.status === 'paid').reduce((sum, request) => sum + request.amount, 0);
-  const monthlyPaid = requests
+  const scopedRequests = canViewQueue ? requests : myRequests;
+  const displayRequests = scopedRequests;
+  const paymentQueue = scopedRequests.filter((request) => request.status === 'approved' || request.status === 'pending_director');
+  const totalPaid = scopedRequests.filter((request) => request.status === 'paid').reduce((sum, request) => sum + request.amount, 0);
+  const monthlyPaid = scopedRequests
     .filter((request) => request.status === 'paid' && request.payment?.paymentDate?.slice(0, 7) === TODAY.slice(0, 7))
     .reduce((sum, request) => sum + request.amount, 0);
-
-  const displayRequests = isApprover ? requests : myRequests;
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -329,6 +332,26 @@ export default function Reimbursements() {
     }).catch((paymentError) => setError(paymentError instanceof Error ? paymentError.message : 'Unable to mark reimbursement as paid.'));
   };
 
+  const markRemaining = async () => {
+    if (!remainingTarget) return;
+    await runAction(`reimbursement-remaining:${remainingTarget.id}`, async () => {
+      const response = await fetch('/api/reimbursements', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ action: 'remaining', reimbursementId: remainingTarget.id }),
+      });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? 'Unable to mark reimbursement as remaining.');
+      const body = await response.json();
+      setRequests((items) => items.map((item) => (item.id === remainingTarget.id ? mapReimbursementRequest(body.data) : item)));
+      setRemainingTarget(null);
+    }, {
+      loading: 'Marking reimbursement as remaining...',
+      success: 'Reimbursement marked as remaining.',
+      error: 'Unable to mark reimbursement as remaining.',
+    }).catch((remainingError) => setError(remainingError instanceof Error ? remainingError.message : 'Unable to mark reimbursement as remaining.'));
+  };
+
   const exportCsv = () => {
     const rows = [
       ['Request ID', 'Employee', 'Category', 'Expense Date', 'Amount', 'Currency', 'Project', 'Status', 'Submitted At'],
@@ -393,11 +416,11 @@ export default function Reimbursements() {
   };
 
   const summary = [
-    { label: 'Total Submitted', value: myRequests.length, cls: 'text-gray-900 bg-gray-50' },
-    { label: 'Pending', value: myRequests.filter((request) => request.status.startsWith('pending')).length, cls: 'text-orange-700 bg-orange-50' },
-    { label: 'Approved', value: myRequests.filter((request) => request.status === 'approved').length, cls: 'text-emerald-700 bg-emerald-50' },
-    { label: 'Rejected', value: myRequests.filter((request) => request.status === 'rejected').length, cls: 'text-red-700 bg-red-50' },
-    { label: 'Paid', value: myRequests.filter((request) => request.status === 'paid').length, cls: 'text-green-700 bg-green-50' },
+    { label: 'Total Submitted', value: scopedRequests.length, cls: 'text-gray-900 bg-gray-50' },
+    { label: 'Pending', value: scopedRequests.filter((request) => request.status.startsWith('pending')).length, cls: 'text-orange-700 bg-orange-50' },
+    { label: 'Remaining', value: scopedRequests.filter((request) => request.status === 'approved' || request.status === 'pending_director').length, cls: 'text-emerald-700 bg-emerald-50' },
+    { label: 'Rejected', value: scopedRequests.filter((request) => request.status === 'rejected').length, cls: 'text-red-700 bg-red-50' },
+    { label: 'Paid', value: scopedRequests.filter((request) => request.status === 'paid').length, cls: 'text-green-700 bg-green-50' },
   ];
 
   return (
@@ -441,11 +464,11 @@ export default function Reimbursements() {
         ))}
       </div>
 
-      {isApprover && (
+      {canViewQueue && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="bg-white rounded-xl border border-orange-100 shadow-sm p-4">
-            <p className="text-orange-700 text-sm font-semibold">Needs My Approval</p>
-            <p className="text-gray-900 text-2xl font-bold mt-2">{pendingForMe.length}</p>
+            <p className="text-orange-700 text-sm font-semibold">{isDirector || isAdmin ? 'Pending Liabilities' : 'Needs My Approval'}</p>
+            <p className="text-gray-900 text-2xl font-bold mt-2">{isDirector || isAdmin ? paymentQueue.length : pendingForMe.length}</p>
           </div>
           <div className="bg-white rounded-xl border border-green-100 shadow-sm p-4">
             <p className="text-green-700 text-sm font-semibold">Pending Payment</p>
@@ -570,7 +593,7 @@ export default function Reimbursements() {
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="text-gray-900 font-semibold">{isApprover ? 'Reimbursement Queue' : 'My Reimbursements'}</h2>
+          <h2 className="text-gray-900 font-semibold">{canViewQueue ? 'Reimbursement Queue' : 'My Reimbursements'}</h2>
           <span className="text-xs text-gray-400">{displayRequests.length} total</span>
         </div>
         {displayRequests.length === 0 ? (
@@ -584,7 +607,7 @@ export default function Reimbursements() {
               const badge = statusBadge(request.status);
               const StatusIcon = badge.icon;
               const pending = pendingApproval(request);
-              const canApprove = Boolean(pending && currentUser && (currentUser.role === 'admin' || pending.approverId === currentUser.id));
+              const canApprove = Boolean(pending && currentUser?.role === 'manager' && pending.approverId === currentUser.id);
               return (
                 <div key={request.id} className="p-5 hover:bg-gray-50/60 transition-colors">
                   <div className="flex items-start justify-between gap-4">
@@ -619,8 +642,11 @@ export default function Reimbursements() {
                         <button onClick={() => setActionTarget({ request, decision: 'more_info' })} className="px-3 py-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 text-sm font-semibold">More Info</button>
                       </>
                     )}
-                    {isAdmin && request.status === 'approved' && (
+                    {isAdmin && (request.status === 'approved' || request.status === 'pending_director') && (
                       <button onClick={() => setPaymentTarget(request)} className="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold">Mark Paid</button>
+                    )}
+                    {isAdmin && request.status === 'paid' && (
+                      <button onClick={() => setRemainingTarget(request)} className="px-3 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 text-sm font-semibold">Mark Remaining</button>
                     )}
                     {canEditOrDelete(request, currentUser?.id, isAdmin) && (
                       <>
@@ -702,6 +728,26 @@ export default function Reimbursements() {
               <button onClick={() => setPaymentTarget(null)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600">Cancel</button>
               <button onClick={() => void markPaid()} disabled={isPending(`reimbursement-payment:${paymentTarget.id}`)} className="flex-1 py-2.5 rounded-xl bg-green-600 text-white font-semibold disabled:opacity-60">
                 {isPending(`reimbursement-payment:${paymentTarget.id}`) ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Mark Paid'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {remainingTarget && (
+        <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-gray-100 p-5">
+            <div className="w-11 h-11 rounded-xl bg-amber-50 flex items-center justify-center mb-4">
+              <Clock className="w-5 h-5 text-amber-600" />
+            </div>
+            <h3 className="text-gray-900 font-semibold">Mark reimbursement as remaining?</h3>
+            <p className="text-gray-500 mt-2 text-sm">
+              This will move {remainingTarget.requestNumber} back to pending payment.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button onClick={() => setRemainingTarget(null)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-600">Cancel</button>
+              <button onClick={() => void markRemaining()} disabled={isPending(`reimbursement-remaining:${remainingTarget.id}`)} className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white font-semibold disabled:opacity-60">
+                {isPending(`reimbursement-remaining:${remainingTarget.id}`) ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Mark Remaining'}
               </button>
             </div>
           </div>
