@@ -42,8 +42,8 @@ export function getWorkingHours(record?: AttendanceRecord) {
 
 export function resolveReportingPolicy(user?: User, policy?: PolicySettings | null) {
   return {
-    reportingTime: user?.reportingTime || policy?.globalReportingTime || '09:00',
-    graceMinutes: user?.checkInGraceMinutes ?? policy?.globalGracePeriod ?? 15,
+    reportingTime: user?.reportingTime || policy?.globalReportingTime || '11:00',
+    graceMinutes: 0,
   };
 }
 
@@ -51,7 +51,7 @@ export function getDelayMinutes(record?: AttendanceRecord, user?: User, policy?:
   const checkIn = minutesFromTime(record?.checkIn);
   if (checkIn === null) return null;
   const { reportingTime, graceMinutes } = resolveReportingPolicy(user, policy);
-  const reporting = minutesFromTime(reportingTime) ?? 9 * 60;
+  const reporting = minutesFromTime(reportingTime) ?? 11 * 60;
   return Math.max(0, checkIn - reporting - graceMinutes);
 }
 

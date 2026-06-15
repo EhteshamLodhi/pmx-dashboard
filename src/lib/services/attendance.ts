@@ -10,6 +10,6 @@ export function calculateHours(checkIn?: string, checkOut?: string) {
 
 export function resolveAttendanceStatus(user: User, record?: Pick<AttendanceRecord, 'checkIn' | 'checkOut' | 'status'>): AttendanceStatus {
   if (!record?.checkIn) return record?.status ?? 'absent';
-  if (!record.checkOut) return record.checkIn > (user.reportingTime ?? '09:00') ? 'late' : 'checked-in-only';
-  return record.checkIn > (user.reportingTime ?? '09:00') ? 'late' : 'present';
+  if (!record.checkOut) return record.checkIn > (user.reportingTime ?? '11:00') ? 'late' : 'checked-in-only';
+  return record.checkIn > (user.reportingTime ?? '11:00') ? 'late' : 'present';
 }

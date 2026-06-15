@@ -39,6 +39,42 @@ function preserveNonWorkingStatus(status: string): AttendanceStatus {
   return status === 'late' ? 'late' : 'present';
 }
 
+async function notifyAllActiveUsers(
+  admin: ReturnType<typeof createAdminClient>,
+  input: {
+    workDate: string;
+    actorId: string;
+    category: 'attendance';
+    title: string;
+    message: string;
+    link: string;
+    sourcePrefix: string;
+  },
+) {
+  const { data: recipients, error } = await admin
+    .from('users')
+    .select('id')
+    .eq('is_active', true);
+
+  if (error) {
+    console.error('Attendance broadcast notification lookup failed', error);
+    return;
+  }
+
+  await Promise.all(
+    (recipients ?? []).map((recipient) =>
+      tryCreateNotification(admin, {
+        userId: recipient.id,
+        category: input.category,
+        title: input.title,
+        message: input.message,
+        link: input.link,
+        sourceKey: `${input.sourcePrefix}:${input.workDate}:${input.actorId}:${recipient.id}`,
+      }),
+    ),
+  );
+}
+
 export async function GET() {
   const { supabase, response } = await requireSupabase();
   if (response) return response;
@@ -64,7 +100,7 @@ export async function POST(request: Request) {
 
     const { data: appUser, error: userError } = await admin
       .from('users')
-      .select('id, full_name, reporting_time, check_in_grace_minutes, line_manager_id, is_active')
+      .select('id, full_name, reporting_time, check_in_grace_minutes, line_manager_id, casual_leave_days, is_active')
       .eq('id', authResult.user.id)
       .maybeSingle();
 
@@ -85,7 +121,7 @@ export async function POST(request: Request) {
       if (existing?.check_in_at) return NextResponse.json({ data: existing });
 
       const [{ data: settings }, { data: holidays }, { data: approvedLeave }] = await Promise.all([
-        admin.from('attendance_settings').select('weekly_off_days').limit(1).maybeSingle(),
+        admin.from('attendance_settings').select('weekly_off_days, casual_leave_days, late_conversion_count').limit(1).maybeSingle(),
         admin.from('holidays').select('id, holiday_name, holiday_date, start_date, end_date, recurring, holiday_type, description'),
         admin
           .from('leave_requests')
@@ -116,8 +152,8 @@ export async function POST(request: Request) {
           : approvedLeave
             ? 'on-leave'
             : null;
-      const reportingTime = appUser.reporting_time ?? '09:00';
-      const status = nonWorkingStatus ?? attendanceStatus(reportingTime, appUser.check_in_grace_minutes ?? 15, localTime());
+      const reportingTime = appUser.reporting_time ?? '11:00';
+      const status = nonWorkingStatus ?? attendanceStatus(reportingTime, 0, localTime());
       const payload = {
         employee_id: authResult.user.id,
         work_date: workDate,
@@ -134,24 +170,73 @@ export async function POST(request: Request) {
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
       const checkInTime = localTime();
-      if (appUser.line_manager_id) {
-        await tryCreateNotification(admin, {
-          userId: appUser.line_manager_id,
-          category: 'attendance',
-          title: `${appUser.full_name} checked in`,
-          message: `${appUser.full_name} checked in at ${formatDisplayTime(checkInTime)}.${status === 'late' ? ' Marked late.' : ''}`,
-          link: '/admin/attendance',
-          sourceKey: `manager-check-in:${workDate}:${authResult.user.id}:${appUser.line_manager_id}`,
-        });
-      }
-
-      await tryCreateRoleNotification(admin, ['director'], {
+      await notifyAllActiveUsers(admin, {
         category: 'attendance',
-        title: 'Employee check-in recorded',
+        title: `${appUser.full_name} checked in`,
         message: `${appUser.full_name} checked in at ${formatDisplayTime(checkInTime)}.${status === 'late' ? ' Marked late.' : ''}`,
         link: '/admin/attendance',
-        sourceKey: `director-check-in:${workDate}:${authResult.user.id}`,
+        sourcePrefix: 'all-check-in',
+        workDate,
+        actorId: authResult.user.id,
       });
+
+      if (status === 'late') {
+        await tryCreateNotification(admin, {
+          userId: authResult.user.id,
+          category: 'attendance',
+          title: 'Late arrival recorded',
+          message: `You checked in at ${formatDisplayTime(checkInTime)} after your reporting time of ${formatDisplayTime(reportingTime)}.`,
+          link: '/attendance',
+          sourceKey: `late-arrival:${workDate}:${authResult.user.id}`,
+        });
+
+        const leaveYear = workDate.slice(0, 4);
+        const [{ data: yearlyLateRows }, { data: casualSickLeaves }] = await Promise.all([
+          admin
+            .from('attendance_logs')
+            .select('id')
+            .eq('employee_id', authResult.user.id)
+            .eq('status', 'late')
+            .gte('work_date', `${leaveYear}-01-01`)
+            .lte('work_date', `${leaveYear}-12-31`),
+          admin
+            .from('leave_requests')
+            .select('total_days')
+            .eq('employee_id', authResult.user.id)
+            .in('leave_type', ['casual', 'minor_sick', 'sick'])
+            .eq('status', 'approved')
+            .gte('start_date', `${leaveYear}-01-01`)
+            .lte('start_date', `${leaveYear}-12-31`),
+        ]);
+
+        const conversionCount = Math.max(1, Number(settings?.late_conversion_count ?? 3));
+        const yearlyLateCount = yearlyLateRows?.length ?? 0;
+        const casualDeductions = Math.floor(yearlyLateCount / conversionCount);
+        const casualEntitlement = Number(appUser.casual_leave_days ?? settings?.casual_leave_days ?? 12);
+        const approvedCasualSickDays = (casualSickLeaves ?? []).reduce((sum, leave) => sum + Number(leave.total_days ?? 0), 0);
+        const payrollDeductionDays = Math.max(0, approvedCasualSickDays + casualDeductions - casualEntitlement);
+
+        if (yearlyLateCount > 0 && yearlyLateCount % conversionCount === 0) {
+          await tryCreateNotification(admin, {
+            userId: authResult.user.id,
+            category: 'leave',
+            title: 'Casual leave deducted',
+            message: `${conversionCount} late arrivals have been converted into 1 casual leave deduction.`,
+            link: '/profile',
+            sourceKey: `late-casual-deduction:${leaveYear}:${authResult.user.id}:${casualDeductions}`,
+          });
+        }
+
+        if (payrollDeductionDays > 0) {
+          await tryCreateRoleNotification(admin, ['admin'], {
+            category: 'admin',
+            title: 'Payroll deduction required',
+            message: `${appUser.full_name} has ${payrollDeductionDays} payroll deduction day(s) due to late-arrival casual leave conversion.`,
+            link: '/admin/users',
+            sourceKey: `late-payroll-deduction:${leaveYear}:${authResult.user.id}:${payrollDeductionDays}`,
+          });
+        }
+      }
 
       return NextResponse.json({ data }, { status: existing?.id ? 200 : 201 });
     }
@@ -175,23 +260,14 @@ export async function POST(request: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
     const checkOutTime = localTime();
-    if (appUser.line_manager_id) {
-      await tryCreateNotification(admin, {
-        userId: appUser.line_manager_id,
-        category: 'attendance',
-        title: `${appUser.full_name} checked out`,
-        message: `${appUser.full_name} checked out at ${formatDisplayTime(checkOutTime)} after ${Number(totalHours.toFixed(2))} hour(s).`,
-        link: '/admin/attendance',
-        sourceKey: `manager-check-out:${workDate}:${authResult.user.id}:${appUser.line_manager_id}`,
-      });
-    }
-
-    await tryCreateRoleNotification(admin, ['director'], {
+    await notifyAllActiveUsers(admin, {
       category: 'attendance',
-      title: 'Employee check-out recorded',
+      title: `${appUser.full_name} checked out`,
       message: `${appUser.full_name} checked out at ${formatDisplayTime(checkOutTime)} after ${Number(totalHours.toFixed(2))} hour(s).`,
       link: '/admin/attendance',
-      sourceKey: `director-check-out:${workDate}:${authResult.user.id}`,
+      sourcePrefix: 'all-check-out',
+      workDate,
+      actorId: authResult.user.id,
     });
 
     return NextResponse.json({ data });

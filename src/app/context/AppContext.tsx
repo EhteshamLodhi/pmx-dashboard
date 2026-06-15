@@ -31,7 +31,7 @@ interface AppContextType {
     reason: string;
   }) => Promise<void>;
   deleteLeaveRequest: (leaveId: string) => Promise<void>;
-  approveLeave: (leaveId: string, level: 1 | 2 | 3, approved: boolean, comment: string) => Promise<void>;
+  approveLeave: (leaveId: string, level: 1 | 2, approved: boolean, comment: string) => Promise<void>;
   updateAttendanceRecord: (id: string, updates: Partial<AttendanceRecord>) => Promise<void>;
   addAttendanceRecord: (record: Omit<AttendanceRecord, 'id'>) => Promise<void>;
   updateUserHierarchy: (userId: string, updates: { lineManagerId?: string; projectManagerId?: string; directorId?: string }) => Promise<void>;
@@ -445,11 +445,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const getAttendanceStatus = useCallback((user: User, checkInTime: string): AttendanceStatus => {
-    const reportingTime = user.reportingTime ?? '09:00';
-    const graceMinutes = user.checkInGraceMinutes ?? 15;
+    const reportingTime = user.reportingTime ?? '11:00';
     const [reportingHours, reportingMinutes] = reportingTime.split(':').map(Number);
     const [checkInHours, checkInMinutes] = checkInTime.split(':').map(Number);
-    return checkInHours * 60 + checkInMinutes > reportingHours * 60 + reportingMinutes + graceMinutes
+    return checkInHours * 60 + checkInMinutes > reportingHours * 60 + reportingMinutes
       ? 'late'
       : 'checked-in-only';
   }, []);
@@ -694,7 +693,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const body = (await response.json()) as { data?: { id: string; submitted_at?: string } };
       if (body.data && currentUser) {
         const manager = users.find((user) => user.id === currentUser.lineManagerId);
-        const projectManager = users.find((user) => user.id === currentUser.projectManagerId);
         const director = users.find((user) => user.id === currentUser.directorId);
         const optimisticLeave: LeaveRequest = {
           id: body.data.id,
@@ -718,13 +716,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             },
             {
               level: 2,
-              approverId: currentUser.projectManagerId ?? '',
-              approverName: projectManager?.name ?? 'Project Manager',
-              role: 'Project Manager',
-              status: 'pending',
-            },
-            {
-              level: 3,
               approverId: currentUser.directorId ?? '',
               approverName: director?.name ?? 'Director',
               role: 'Director',
@@ -761,7 +752,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const approveLeave = useCallback(
-    async (leaveId: string, level: 1 | 2 | 3, approved: boolean, comment: string) => {
+    async (leaveId: string, level: 1 | 2, approved: boolean, comment: string) => {
       const response = await fetch('/api/leave-requests', {
         method: 'PATCH',
         headers: {
@@ -788,10 +779,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ...request,
             status: approved
               ? level === 1
-                ? 'pending_project_manager'
-                : level === 2
-                  ? 'pending_director'
-                  : 'approved'
+                ? 'pending_director'
+                : 'approved'
               : 'rejected',
             approvals: request.approvals.map((approval) =>
               approval.level === level
@@ -831,7 +820,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         edited_at: new Date().toISOString(),
       };
 
-      if (currentUser.role === 'admin') {
+      if (currentUser.role === 'admin' || currentUser.role === 'manager') {
         const response = await fetch('/api/admin/attendance', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -869,7 +858,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const payload = {
         employee_id: record.userId,
         work_date: record.date,
-        reporting_time: users.find((item) => item.id === record.userId)?.reportingTime ?? '09:00',
+        reporting_time: users.find((item) => item.id === record.userId)?.reportingTime ?? '11:00',
         check_in_at: record.checkIn ? new Date(`${record.date}T${record.checkIn}:00`).toISOString() : null,
         check_out_at: record.checkOut ? new Date(`${record.date}T${record.checkOut}:00`).toISOString() : null,
         total_hours: getTotalHours(record.checkIn, record.checkOut) ?? null,
@@ -882,7 +871,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const existing = attendanceRecords.find((item) => item.userId === record.userId && item.date === record.date);
 
       if (existing) {
-        if (currentUser.role === 'admin') {
+        if (currentUser.role === 'admin' || currentUser.role === 'manager') {
           const response = await fetch('/api/admin/attendance', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -911,7 +900,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ),
           );
         }
-      } else if (currentUser.role === 'admin') {
+      } else if (currentUser.role === 'admin' || currentUser.role === 'manager') {
         const response = await fetch('/api/admin/attendance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
+import type { PolicySettings } from '../types';
+import { calculateEmployeePolicyStats } from '@/lib/leave-balances';
 
 function getRoleLabel(role: string) {
   switch (role) {
@@ -41,10 +43,20 @@ export default function Profile() {
   const [phone, setPhone] = useState(currentUser?.phone ?? '');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSavingPhone, setIsSavingPhone] = useState(false);
+  const [policy, setPolicy] = useState<PolicySettings | null>(null);
 
   useEffect(() => {
     setPhone(currentUser?.phone ?? '');
   }, [currentUser?.phone]);
+
+  useEffect(() => {
+    fetch('/api/admin/policies', { credentials: 'include' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (body?.data) setPolicy(body.data);
+      })
+      .catch(() => setPolicy(null));
+  }, []);
 
   if (!currentUser) return null;
 
@@ -55,6 +67,12 @@ export default function Profile() {
   const myAttendance = getAttendanceForUser(currentUser.id);
   const presentDays = myAttendance.filter((record) => record.status === 'present' || record.status === 'late').length;
   const myLeaves = leaveRequests.filter((request) => request.userId === currentUser.id && request.status === 'approved').length;
+  const policyStats = calculateEmployeePolicyStats({
+    user: currentUser,
+    attendanceRecords: myAttendance,
+    leaveRequests,
+    policy,
+  });
 
   const handleLogout = () => {
     void runAction('profile-logout', async () => {
@@ -134,6 +152,33 @@ export default function Profile() {
               <p className="text-gray-400" style={{ fontSize: '11px' }}>
                 {stat.label}
               </p>
+            </div>
+          ))}
+        </div>
+
+        {policyStats.payrollDeductionRequired && (
+          <div className="border-b border-red-100 bg-red-50 px-5 py-3 flex items-start gap-2 text-red-600">
+            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-sm">Payroll deduction required</p>
+              <p className="text-xs mt-0.5">
+                {policyStats.pendingPayrollDeductions} day(s) pending after late-arrival casual leave conversion.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-5 border-b border-gray-100">
+          {[
+            { label: 'Total Late', value: policyStats.totalLateArrivals },
+            { label: 'Late This Month', value: policyStats.lateArrivalsThisMonth },
+            { label: 'Late This Year', value: policyStats.lateArrivalsThisYear },
+            { label: 'Casual Deducted', value: policyStats.casualLeavesDeductedDueToLate },
+            { label: 'Late Before Next', value: policyStats.remainingLateBeforeNextDeduction },
+          ].map((stat) => (
+            <div key={stat.label} className="p-3 text-center border-r border-gray-100 last:border-r-0">
+              <p className="text-gray-900" style={{ fontSize: '16px', fontWeight: 700 }}>{stat.value}</p>
+              <p className="text-gray-400" style={{ fontSize: '10px' }}>{stat.label}</p>
             </div>
           ))}
         </div>

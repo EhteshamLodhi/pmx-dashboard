@@ -74,13 +74,18 @@ export async function POST(request: Request) {
       email: String(body.email ?? '').trim().toLowerCase(),
       role: body.role,
       project_id: projectId,
-      reporting_time: body.reportingTime || '09:00',
-      check_in_grace_minutes: Number(body.checkInGraceMinutes ?? 15),
-      check_out_reminder_time: body.checkOutReminderTime || '19:00',
-      sick_leave_days: Number(body.sickLeaveDays ?? 10),
-      emergency_leave_days: Number(body.emergencyLeaveDays ?? 5),
-      casual_leave_days: Number(body.casualLeaveDays ?? 10),
-      annual_leave_days: Number(body.annualLeaveDays ?? 14),
+      reporting_time: body.reportingTime || '11:00',
+      check_in_grace_minutes: Number(body.checkInGraceMinutes ?? 0),
+      check_out_reminder_time: body.checkOutReminderTime || '20:00',
+      sick_leave_days: Number(body.sickLeaveDays ?? 0),
+      minor_sick_leave_days: Number(body.minorSickLeaveDays ?? 12),
+      emergency_leave_days: Number(body.emergencyLeaveDays ?? 3),
+      casual_leave_days: Number(body.casualLeaveDays ?? 12),
+      annual_leave_days: Number(body.annualLeaveDays ?? 10),
+      paternity_leave_days: Number(body.paternityLeaveDays ?? 3),
+      marriage_leave_days: Number(body.marriageLeaveDays ?? 3),
+      hajj_leave_days: Number(body.hajjLeaveDays ?? 40),
+      umrah_leave_days: Number(body.umrahLeaveDays ?? 0),
       line_manager_id: body.lineManagerId || null,
       project_manager_id: body.projectManagerId || null,
       director_id: body.directorId || null,
@@ -106,6 +111,11 @@ export async function PATCH(request: Request) {
   }
 
   const projectId = project !== undefined ? await ensureProject(admin, project) : undefined;
+  const { data: beforeState } = await admin
+    .from('users')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
 
   const payload: Record<string, unknown> = {
     full_name: updates.name,
@@ -115,9 +125,14 @@ export async function PATCH(request: Request) {
     check_in_grace_minutes: updates.checkInGraceMinutes,
     check_out_reminder_time: updates.checkOutReminderTime,
     sick_leave_days: updates.sickLeaveDays,
+    minor_sick_leave_days: updates.minorSickLeaveDays,
     emergency_leave_days: updates.emergencyLeaveDays,
     casual_leave_days: updates.casualLeaveDays,
     annual_leave_days: updates.annualLeaveDays,
+    paternity_leave_days: updates.paternityLeaveDays,
+    marriage_leave_days: updates.marriageLeaveDays,
+    hajj_leave_days: updates.hajjLeaveDays,
+    umrah_leave_days: updates.umrahLeaveDays,
     line_manager_id: updates.lineManagerId || null,
     project_manager_id: updates.projectManagerId || null,
     director_id: updates.directorId || null,
@@ -141,5 +156,13 @@ export async function PATCH(request: Request) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await admin.from('audit_logs').insert({
+    actor_id: authResult.appUser?.id,
+    entity_type: 'user',
+    entity_id: id,
+    action: 'admin_user_update',
+    before_state: beforeState ?? null,
+    after_state: data,
+  });
   return NextResponse.json({ data });
 }

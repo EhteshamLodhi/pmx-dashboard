@@ -59,9 +59,9 @@ function statusBadge(status: ReimbursementRequest['status']) {
     case 'rejected':
       return { label: 'Rejected', cls: 'bg-red-100 text-red-700', icon: XCircle };
     case 'pending_manager':
-      return { label: 'Pending Manager', cls: 'bg-yellow-100 text-yellow-700', icon: Clock };
+      return { label: 'Pending Admin Review', cls: 'bg-yellow-100 text-yellow-700', icon: Clock };
     case 'pending_director':
-      return { label: 'Pending Payment', cls: 'bg-orange-100 text-orange-700', icon: Clock };
+      return { label: 'Pending Director', cls: 'bg-orange-100 text-orange-700', icon: Clock };
     case 'more_info':
       return { label: 'More Info', cls: 'bg-blue-100 text-blue-700', icon: FileText };
     case 'cancelled':
@@ -90,13 +90,18 @@ function ApprovalTimeline({ request }: { request: ReimbursementRequest }) {
       comment: undefined,
     },
     ...request.approvals.map((approval) => ({
-      label: approval.role,
-      sublabel: approval.approverName,
+      label: approval.level === 1 ? 'Admin' : approval.level === 2 ? 'Director' : approval.role,
+      sublabel:
+        approval.level === 1 && approval.role !== 'Admin'
+          ? 'Admin'
+          : approval.level === 2 && approval.role !== 'Director'
+            ? 'Director'
+            : approval.approverName,
       status: approval.status,
       comment: approval.comment,
     })),
     {
-      label: 'Paid',
+      label: request.status === 'paid' ? 'Paid' : 'Payment',
       sublabel: request.payment?.processedBy ?? 'Finance/Admin',
       status: request.status === 'paid' ? 'approved' : 'pending',
       comment: request.payment?.remarks,
@@ -161,8 +166,7 @@ export default function Reimbursements() {
 
   const isAdmin = currentUser?.role === 'admin';
   const isDirector = currentUser?.role === 'director';
-  const isManager = currentUser?.role === 'manager';
-  const canViewQueue = isManager || isDirector || isAdmin;
+  const canViewQueue = isDirector || isAdmin;
 
   const load = async () => {
     const response = await fetch('/api/reimbursements', { credentials: 'include' });
@@ -193,14 +197,17 @@ export default function Reimbursements() {
       requests.filter((request) => {
         const pending = pendingApproval(request);
         if (!pending || !currentUser) return false;
-        return currentUser.role === 'manager' && pending.approverId === currentUser.id;
+        return (
+          (currentUser.role === 'admin' && pending.level === 1) ||
+          (currentUser.role === 'director' && pending.level === 2 && pending.approverId === currentUser.id)
+        );
       }),
     [currentUser, requests],
   );
 
   const scopedRequests = canViewQueue ? requests : myRequests;
   const displayRequests = scopedRequests;
-  const paymentQueue = scopedRequests.filter((request) => request.status === 'approved' || request.status === 'pending_director');
+  const paymentQueue = scopedRequests.filter((request) => request.status === 'approved');
   const totalPaid = scopedRequests.filter((request) => request.status === 'paid').reduce((sum, request) => sum + request.amount, 0);
   const monthlyPaid = scopedRequests
     .filter((request) => request.status === 'paid' && request.payment?.paymentDate?.slice(0, 7) === TODAY.slice(0, 7))
@@ -418,7 +425,7 @@ export default function Reimbursements() {
   const summary = [
     { label: 'Total Submitted', value: scopedRequests.length, cls: 'text-gray-900 bg-gray-50' },
     { label: 'Pending', value: scopedRequests.filter((request) => request.status.startsWith('pending')).length, cls: 'text-orange-700 bg-orange-50' },
-    { label: 'Remaining', value: scopedRequests.filter((request) => request.status === 'approved' || request.status === 'pending_director').length, cls: 'text-emerald-700 bg-emerald-50' },
+    { label: 'Remaining', value: scopedRequests.filter((request) => request.status === 'approved').length, cls: 'text-emerald-700 bg-emerald-50' },
     { label: 'Rejected', value: scopedRequests.filter((request) => request.status === 'rejected').length, cls: 'text-red-700 bg-red-50' },
     { label: 'Paid', value: scopedRequests.filter((request) => request.status === 'paid').length, cls: 'text-green-700 bg-green-50' },
   ];
@@ -467,8 +474,8 @@ export default function Reimbursements() {
       {canViewQueue && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="bg-white rounded-xl border border-orange-100 shadow-sm p-4">
-            <p className="text-orange-700 text-sm font-semibold">{isDirector || isAdmin ? 'Pending Liabilities' : 'Needs My Approval'}</p>
-            <p className="text-gray-900 text-2xl font-bold mt-2">{isDirector || isAdmin ? paymentQueue.length : pendingForMe.length}</p>
+            <p className="text-orange-700 text-sm font-semibold">{isAdmin ? 'Pending Admin Approval / Payment' : 'Pending Liabilities'}</p>
+            <p className="text-gray-900 text-2xl font-bold mt-2">{isAdmin ? pendingForMe.length + paymentQueue.length : paymentQueue.length}</p>
           </div>
           <div className="bg-white rounded-xl border border-green-100 shadow-sm p-4">
             <p className="text-green-700 text-sm font-semibold">Pending Payment</p>
@@ -607,7 +614,13 @@ export default function Reimbursements() {
               const badge = statusBadge(request.status);
               const StatusIcon = badge.icon;
               const pending = pendingApproval(request);
-              const canApprove = Boolean(pending && currentUser?.role === 'manager' && pending.approverId === currentUser.id);
+              const canApprove = Boolean(
+                pending &&
+                (
+                  (currentUser?.role === 'admin' && pending.level === 1) ||
+                  (currentUser?.role === 'director' && pending.level === 2 && pending.approverId === currentUser.id)
+                ),
+              );
               return (
                 <div key={request.id} className="p-5 hover:bg-gray-50/60 transition-colors">
                   <div className="flex items-start justify-between gap-4">
@@ -642,7 +655,7 @@ export default function Reimbursements() {
                         <button onClick={() => setActionTarget({ request, decision: 'more_info' })} className="px-3 py-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 text-sm font-semibold">More Info</button>
                       </>
                     )}
-                    {isAdmin && (request.status === 'approved' || request.status === 'pending_director') && (
+                    {isAdmin && request.status === 'approved' && (
                       <button onClick={() => setPaymentTarget(request)} className="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-sm font-semibold">Mark Paid</button>
                     )}
                     {isAdmin && request.status === 'paid' && (

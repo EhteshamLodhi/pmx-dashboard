@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireSupabase } from '@/server/responses';
 import { requireAuthenticatedUser } from '@/server/auth';
-import { tryCreateNotification } from '@/server/notifications';
+import { tryCreateNotification, tryCreateRoleNotification } from '@/server/notifications';
+import type { LeaveType, PolicySettings } from '@/app/types';
+import { defaultPolicySettings, getLeaveTypeLabel, LEAVE_TYPES } from '@/lib/powermatix-policy';
 
-const leaveTypes = ['sick', 'emergency', 'casual', 'annual'] as const;
-type LeaveType = (typeof leaveTypes)[number];
+const leaveTypes: LeaveType[] = [...LEAVE_TYPES, 'sick'];
+const CASUAL_SICK_TYPES: LeaveType[] = ['casual', 'minor_sick', 'sick'];
 
 function localNow() {
   const now = new Date();
@@ -24,6 +26,11 @@ function dateAtLocalMidnight(value: string) {
   return new Date(`${value}T00:00:00`);
 }
 
+function toNumber(value: unknown, fallback: number) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
 function leaveDaysBetween(startDate: string, endDate: string) {
   const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
   const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
@@ -32,32 +39,95 @@ function leaveDaysBetween(startDate: string, endDate: string) {
   return Math.floor((end - start) / 86_400_000) + 1;
 }
 
+function isWeekday(date: Date) {
+  const day = date.getDay();
+  return day !== 0 && day !== 6;
+}
+
+function workingDaysUntil(startDate: string) {
+  const start = dateAtLocalMidnight(localDateIso());
+  const end = dateAtLocalMidnight(startDate);
+  let days = 0;
+  const cursor = new Date(start);
+  cursor.setDate(cursor.getDate() + 1);
+
+  while (cursor < end) {
+    if (isWeekday(cursor)) days += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return days;
+}
+
+function completedServiceMonths(joinDate: string | null | undefined, onDate: string) {
+  if (!joinDate) return 0;
+  const joined = dateAtLocalMidnight(joinDate);
+  const target = dateAtLocalMidnight(onDate);
+  if (Number.isNaN(joined.getTime()) || Number.isNaN(target.getTime())) return 0;
+  let months = (target.getFullYear() - joined.getFullYear()) * 12 + target.getMonth() - joined.getMonth();
+  if (target.getDate() < joined.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+function monthBounds(date: string) {
+  const [year, month] = date.split('-').map(Number);
+  const last = new Date(year, month, 0).getDate();
+  return {
+    start: `${year}-${String(month).padStart(2, '0')}-01`,
+    end: `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`,
+  };
+}
+
+function policyFromSettings(settings?: Record<string, unknown> | null): PolicySettings {
+  const defaults = defaultPolicySettings();
+  return {
+    ...defaults,
+    annualLeaveDays: toNumber(settings?.annual_leave_days, defaults.annualLeaveDays),
+    casualLeaveDays: toNumber(settings?.casual_leave_days, defaults.casualLeaveDays),
+    sickLeaveDays: toNumber(settings?.sick_leave_days, defaults.sickLeaveDays),
+    minorSickLeaveDays: toNumber(settings?.minor_sick_leave_days, defaults.minorSickLeaveDays),
+    emergencyLeaveDays: toNumber(settings?.emergency_leave_days, defaults.emergencyLeaveDays),
+    paternityLeaveDays: toNumber(settings?.paternity_leave_days, defaults.paternityLeaveDays),
+    marriageLeaveDays: toNumber(settings?.marriage_leave_days, defaults.marriageLeaveDays),
+    hajjLeaveDays: toNumber(settings?.hajj_leave_days, defaults.hajjLeaveDays),
+    umrahLeaveDays: toNumber(settings?.umrah_leave_days, defaults.umrahLeaveDays),
+    casualSickMonthlyCapDays: toNumber(settings?.casual_sick_monthly_cap_days, defaults.casualSickMonthlyCapDays),
+    annualLeaveEligibilityMonths: toNumber(settings?.annual_leave_eligibility_months, defaults.annualLeaveEligibilityMonths),
+    casualLeaveNoticeHours: toNumber(settings?.casual_leave_notice_hours, defaults.casualLeaveNoticeHours),
+    annualLeaveNoticeHours: toNumber(settings?.annual_leave_notice_hours, defaults.annualLeaveNoticeHours),
+    annualLeaveNoticeWorkingDays: toNumber(
+      settings?.annual_leave_notice_working_days,
+      Math.ceil(toNumber(settings?.annual_leave_notice_hours, defaults.annualLeaveNoticeHours) / 24),
+    ),
+  };
+}
+
 function leaveAllowance(
   employee: {
     sick_leave_days?: number | null;
+    minor_sick_leave_days?: number | null;
     emergency_leave_days?: number | null;
     casual_leave_days?: number | null;
     annual_leave_days?: number | null;
+    paternity_leave_days?: number | null;
+    marriage_leave_days?: number | null;
+    hajj_leave_days?: number | null;
+    umrah_leave_days?: number | null;
   },
   type: LeaveType,
+  policy: PolicySettings,
 ) {
-  if (type === 'sick') return employee.sick_leave_days ?? 10;
-  if (type === 'emergency') return employee.emergency_leave_days ?? 5;
-  if (type === 'casual') return employee.casual_leave_days ?? 10;
-  return employee.annual_leave_days ?? 14;
+  if (type === 'annual') return employee.annual_leave_days ?? policy.annualLeaveDays;
+  if (type === 'casual' || type === 'minor_sick' || type === 'sick') return employee.casual_leave_days ?? policy.casualLeaveDays;
+  if (type === 'emergency') return employee.emergency_leave_days ?? policy.emergencyLeaveDays;
+  if (type === 'paternity') return employee.paternity_leave_days ?? policy.paternityLeaveDays;
+  if (type === 'marriage') return employee.marriage_leave_days ?? policy.marriageLeaveDays;
+  if (type === 'hajj') return employee.hajj_leave_days ?? policy.hajjLeaveDays;
+  return employee.umrah_leave_days ?? policy.umrahLeaveDays;
 }
 
-function leaveTypeLabel(type: LeaveType) {
-  switch (type) {
-    case 'sick':
-      return 'sick';
-    case 'emergency':
-      return 'emergency';
-    case 'casual':
-      return 'casual';
-    case 'annual':
-      return 'annual';
-  }
+function requestedTypesForBalance(type: LeaveType) {
+  return CASUAL_SICK_TYPES.includes(type) ? CASUAL_SICK_TYPES : [type];
 }
 
 export async function GET() {
@@ -92,35 +162,45 @@ export async function POST(request: Request) {
 
   const leaveType = type as LeaveType;
   const today = localDateIso();
-  if (startDate <= today || endDate < startDate) {
-    return NextResponse.json({ error: 'Leave can only be requested for future dates.' }, { status: 400 });
+  const sameDayAllowed = leaveType === 'emergency';
+  if ((!sameDayAllowed && startDate <= today) || (sameDayAllowed && startDate < today) || endDate < startDate) {
+    return NextResponse.json(
+      { error: sameDayAllowed ? 'Emergency leave can be requested from today onward.' : 'Leave can only be requested for future dates.' },
+      { status: 400 },
+    );
   }
 
   const { data: settings, error: settingsError } = await admin
     .from('attendance_settings')
-    .select('casual_leave_notice_hours, annual_leave_notice_hours')
+    .select('*')
     .limit(1)
     .maybeSingle();
 
   if (settingsError) return NextResponse.json({ error: settingsError.message }, { status: 500 });
+  const policy = policyFromSettings(settings as Record<string, unknown> | null);
 
   const minimumLeaveNoticeHours =
     leaveType === 'casual'
-      ? settings?.casual_leave_notice_hours ?? 48
-      : leaveType === 'annual'
-        ? settings?.annual_leave_notice_hours ?? 48
-        : 0;
+      ? policy.casualLeaveNoticeHours
+      : 0;
   const requestedStart = dateAtLocalMidnight(startDate);
   if (minimumLeaveNoticeHours > 0 && requestedStart.getTime() - localNow().getTime() < minimumLeaveNoticeHours * 3_600_000) {
     return NextResponse.json(
-      { error: `${leaveTypeLabel(leaveType)} leave requests require at least ${minimumLeaveNoticeHours} hours notice.` },
+      { error: `${getLeaveTypeLabel(leaveType)} requests require at least ${minimumLeaveNoticeHours} hours notice.` },
+      { status: 400 },
+    );
+  }
+
+  if (leaveType === 'annual' && workingDaysUntil(startDate) < policy.annualLeaveNoticeWorkingDays) {
+    return NextResponse.json(
+      { error: `Annual leave requests require at least ${policy.annualLeaveNoticeWorkingDays} working days notice.` },
       { status: 400 },
     );
   }
 
   const { data: employee, error: employeeError } = await admin
     .from('users')
-    .select('id, full_name, line_manager_id, project_manager_id, director_id, sick_leave_days, emergency_leave_days, casual_leave_days, annual_leave_days')
+    .select('id, full_name, joined_at, line_manager_id, director_id, sick_leave_days, minor_sick_leave_days, emergency_leave_days, casual_leave_days, annual_leave_days, paternity_leave_days, marriage_leave_days, hajj_leave_days, umrah_leave_days')
     .eq('id', authResult.user.id)
     .maybeSingle();
 
@@ -128,33 +208,63 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Employee profile is not configured yet.' }, { status: 400 });
   }
 
-  if (!employee.line_manager_id || !employee.project_manager_id || !employee.director_id) {
+  if (!employee.line_manager_id || !employee.director_id) {
     return NextResponse.json(
-      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a line manager, project manager, and director.' },
+      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a line manager and director.' },
       { status: 400 },
     );
   }
 
   const requestedDays = leaveDaysBetween(startDate, endDate);
-  const allowance = leaveAllowance(employee, leaveType);
+  if (leaveType === 'annual' && completedServiceMonths(employee.joined_at, startDate) < policy.annualLeaveEligibilityMonths) {
+    return NextResponse.json(
+      { error: `Annual leave is available after ${policy.annualLeaveEligibilityMonths} months of continuous service.` },
+      { status: 400 },
+    );
+  }
+
+  const allowance = leaveAllowance(employee, leaveType, policy);
   const leaveYear = startDate.slice(0, 4);
-  const { data: approvedLeaves, error: approvedLeavesError } = await admin
+  const balanceTypes = requestedTypesForBalance(leaveType);
+  const { data: yearlyLeaves, error: approvedLeavesError } = await admin
     .from('leave_requests')
-    .select('total_days')
+    .select('total_days, status')
     .eq('employee_id', authResult.user.id)
-    .eq('leave_type', leaveType)
-    .eq('status', 'approved')
+    .in('leave_type', balanceTypes)
+    .neq('status', 'rejected')
     .gte('start_date', `${leaveYear}-01-01`)
     .lte('start_date', `${leaveYear}-12-31`);
 
   if (approvedLeavesError) return NextResponse.json({ error: approvedLeavesError.message }, { status: 500 });
 
-  const usedDays = (approvedLeaves ?? []).reduce((total, leave) => total + Number(leave.total_days ?? 0), 0);
-  if (usedDays + requestedDays > allowance) {
+  const usedDays = (yearlyLeaves ?? []).reduce((total, leave) => total + Number(leave.total_days ?? 0), 0);
+  if (leaveType !== 'umrah' && usedDays + requestedDays > allowance) {
     return NextResponse.json(
-      { error: `This request exceeds the available ${leaveType} leave balance of ${Math.max(allowance - usedDays, 0)} day(s).` },
+      { error: `This request exceeds the available ${getLeaveTypeLabel(leaveType).toLowerCase()} balance of ${Math.max(allowance - usedDays, 0)} day(s).` },
       { status: 400 },
     );
+  }
+
+  if (CASUAL_SICK_TYPES.includes(leaveType)) {
+    const bounds = monthBounds(startDate);
+    const { data: monthLeaves, error: monthLeavesError } = await admin
+      .from('leave_requests')
+      .select('total_days')
+      .eq('employee_id', authResult.user.id)
+      .in('leave_type', CASUAL_SICK_TYPES)
+      .neq('status', 'rejected')
+      .gte('start_date', bounds.start)
+      .lte('start_date', bounds.end);
+
+    if (monthLeavesError) return NextResponse.json({ error: monthLeavesError.message }, { status: 500 });
+
+    const monthUsed = (monthLeaves ?? []).reduce((total, leave) => total + Number(leave.total_days ?? 0), 0);
+    if (monthUsed + requestedDays > policy.casualSickMonthlyCapDays) {
+      return NextResponse.json(
+        { error: `Casual and minor sick leave are limited to ${policy.casualSickMonthlyCapDays} day(s) per month unless admin approves an override.` },
+        { status: 400 },
+      );
+    }
   }
 
   const { data, error } = await admin
@@ -183,13 +293,6 @@ export async function POST(request: Request) {
     {
       leave_request_id: data.id,
       approval_level: 2,
-      approver_id: employee.project_manager_id,
-      approver_role: 'Project Manager',
-      status: 'pending',
-    },
-    {
-      leave_request_id: data.id,
-      approval_level: 3,
       approver_id: employee.director_id,
       approver_role: 'Director',
       status: 'pending',
@@ -210,6 +313,14 @@ export async function POST(request: Request) {
     sourceKey: `leave-submitted:${data.id}:manager`,
   });
 
+  await tryCreateRoleNotification(admin, ['admin'], {
+    category: 'approval',
+    title: 'Leave request submitted',
+    message: `${employee.full_name ?? 'An employee'} submitted a leave request for ${startDate} to ${endDate}.`,
+    link: '/approvals',
+    sourceKey: `leave-submitted:${data.id}:admin`,
+  });
+
   return NextResponse.json({ data }, { status: 201 });
 }
 
@@ -218,7 +329,7 @@ export async function PATCH(request: Request) {
   if (authResult.response || !authResult.user) return authResult.response;
 
   const { leaveId, level, approved, comment } = await request.json();
-  if (!leaveId || ![1, 2, 3].includes(level) || typeof approved !== 'boolean') {
+  if (!leaveId || ![1, 2].includes(level) || typeof approved !== 'boolean') {
     return NextResponse.json({ error: 'Invalid approval payload.' }, { status: 400 });
   }
 
@@ -235,7 +346,7 @@ export async function PATCH(request: Request) {
 
   const { data: workflowSteps, error: workflowError } = await admin
     .from('approval_workflow')
-    .select('id, approver_id, approval_level, status')
+    .select('id, approver_id, approver_role, approval_level, status')
     .eq('leave_request_id', leaveId)
     .order('approval_level');
 
@@ -243,7 +354,14 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Approval workflow step was not found.' }, { status: 404 });
   }
 
-  const workflow = workflowSteps.find((step) => step.approval_level === level);
+  const activeWorkflowSteps = workflowSteps.filter(
+    (step) => !String(step.approver_role ?? '').toLowerCase().includes('project manager'),
+  );
+  const workflow = activeWorkflowSteps.find(
+    (step) =>
+      step.approval_level === level ||
+      (level === 2 && String(step.approver_role ?? '').toLowerCase().includes('director')),
+  );
   if (!workflow) {
     return NextResponse.json({ error: 'Approval workflow step was not found.' }, { status: 404 });
   }
@@ -256,7 +374,12 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'This approval step has already been completed.' }, { status: 400 });
   }
 
-  const previousSteps = workflowSteps.filter((step) => step.approval_level < level);
+  const previousSteps = activeWorkflowSteps.filter((step) => {
+    const normalizedLevel = String(step.approver_role ?? '').toLowerCase().includes('director')
+      ? 2
+      : step.approval_level;
+    return normalizedLevel < level;
+  });
   if (previousSteps.some((step) => step.status !== 'approved')) {
     return NextResponse.json({ error: 'Previous approval steps must be completed first.' }, { status: 400 });
   }
@@ -265,10 +388,8 @@ export async function PATCH(request: Request) {
   const nextStatus =
     approved
       ? level === 1
-        ? 'pending_project_manager'
-        : level === 2
-          ? 'pending_director'
-          : 'approved'
+        ? 'pending_director'
+        : 'approved'
       : 'rejected';
 
   const { data: leave, error: leaveError } = await admin
@@ -283,7 +404,7 @@ export async function PATCH(request: Request) {
 
   const { data: employeeProfile, error: employeeProfileError } = await admin
     .from('users')
-    .select('full_name, project_manager_id, director_id')
+    .select('full_name, director_id')
     .eq('id', leave.employee_id)
     .maybeSingle();
 
@@ -317,34 +438,20 @@ export async function PATCH(request: Request) {
   }
 
   if (approved && level === 1) {
-    const projectManagerId = employeeProfile.project_manager_id;
-    if (projectManagerId) {
-      await tryCreateNotification(admin, {
-        userId: projectManagerId,
-        category: 'approval',
-        title: 'Project manager approval pending',
-        message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for your review.`,
-        link: '/approvals',
-        sourceKey: `leave-line-manager-approved:${leaveId}:project-manager`,
-      });
-    }
-  }
-
-  if (approved && level === 2) {
     const directorId = employeeProfile.director_id;
     if (directorId) {
       await tryCreateNotification(admin, {
         userId: directorId,
         category: 'approval',
         title: 'Director approval pending',
-        message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for final approval.`,
+        message: `A leave request for ${leave.start_date} to ${leave.end_date} is waiting for your review.`,
         link: '/approvals',
-        sourceKey: `leave-project-manager-approved:${leaveId}:director`,
+        sourceKey: `leave-line-manager-approved:${leaveId}:director`,
       });
     }
   }
 
-  if (!approved || level === 3) {
+  if (!approved || level === 2) {
     await tryCreateNotification(admin, {
       userId: leave.employee_id,
       category: 'leave',
@@ -356,6 +463,14 @@ export async function PATCH(request: Request) {
       sourceKey: `leave-final:${leaveId}:${approved ? 'approved' : 'rejected'}`,
     });
   }
+
+  await tryCreateRoleNotification(admin, ['admin'], {
+    category: 'approval',
+    title: approved ? 'Leave approval updated' : 'Leave request rejected',
+    message: `${employeeProfile.full_name ?? 'An employee'}'s leave request for ${leave.start_date} to ${leave.end_date} was ${approved ? 'approved at step ' + level : 'rejected'}.`,
+    link: '/approvals',
+    sourceKey: `leave-admin-update:${leaveId}:${level}:${approved ? 'approved' : 'rejected'}`,
+  });
 
   if (!approved) {
     const directorId = employeeProfile.director_id;

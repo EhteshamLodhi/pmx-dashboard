@@ -11,9 +11,14 @@ export interface User {
   checkInGraceMinutes?: number;
   checkOutReminderTime?: string;
   sickLeaveDays?: number;
+  minorSickLeaveDays?: number;
   emergencyLeaveDays?: number;
   casualLeaveDays?: number;
   annualLeaveDays?: number;
+  paternityLeaveDays?: number;
+  marriageLeaveDays?: number;
+  hajjLeaveDays?: number;
+  umrahLeaveDays?: number;
   lineManagerId?: string;
   projectManagerId?: string;
   directorId?: string;
@@ -58,7 +63,7 @@ export interface Holiday {
   description?: string;
 }
 
-export type LeaveType = 'sick' | 'emergency' | 'casual' | 'annual';
+export type LeaveType = 'sick' | 'minor_sick' | 'emergency' | 'casual' | 'annual' | 'paternity' | 'marriage' | 'hajj' | 'umrah';
 export type LeaveStatus = 'pending_manager' | 'pending_project_manager' | 'pending_director' | 'approved' | 'rejected';
 
 export interface LeaveApproval {
@@ -168,19 +173,30 @@ export interface AppNotification {
 }
 
 export interface PolicySettings {
+  policyEffectiveDate: string;
   defaultReportingTime: string;
   checkInGraceMinutes: number;
   globalReportingTime: string;
   globalGracePeriod: number;
   checkOutReminderTime: string;
+  closingTime: string;
   workingDays: string[];
   weeklyOffDays: string[];
   workWeekEffectiveFrom: string;
   sickLeaveDays: number;
+  minorSickLeaveDays: number;
   emergencyLeaveDays: number;
   casualLeaveDays: number;
   annualLeaveDays: number;
+  paternityLeaveDays: number;
+  marriageLeaveDays: number;
+  hajjLeaveDays: number;
+  umrahLeaveDays: number;
+  casualSickMonthlyCapDays: number;
+  lateConversionCount: number;
+  annualLeaveEligibilityMonths: number;
   casualLeaveNoticeHours: number;
   annualLeaveNoticeHours: number;
+  annualLeaveNoticeWorkingDays: number;
   leavePolicyNotes: string;
 }

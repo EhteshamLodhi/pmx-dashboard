@@ -7,6 +7,7 @@ import type { Holiday, HolidayType, PolicySettings, User } from '../types';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
 import { WEEK_DAYS, weekdayLabel } from '@/lib/attendance-calendar';
 import { mapHoliday } from '@/lib/supabase/mappers';
+import { defaultPolicySettings } from '@/lib/powermatix-policy';
 
 function getRoleBadge(role: User['role']) {
   switch (role) {
@@ -40,13 +41,18 @@ function UserRow({
     directorId: user.directorId ?? '',
     role: user.role,
     isActive: user.isActive,
-    reportingTime: user.reportingTime ?? '09:00',
-    checkInGraceMinutes: user.checkInGraceMinutes ?? 15,
-    checkOutReminderTime: user.checkOutReminderTime ?? '19:00',
-    sickLeaveDays: user.sickLeaveDays ?? 10,
-    emergencyLeaveDays: user.emergencyLeaveDays ?? 5,
-    casualLeaveDays: user.casualLeaveDays ?? 10,
-    annualLeaveDays: user.annualLeaveDays ?? 14,
+    reportingTime: user.reportingTime ?? '11:00',
+    checkInGraceMinutes: user.checkInGraceMinutes ?? 0,
+    checkOutReminderTime: user.checkOutReminderTime ?? '20:00',
+    sickLeaveDays: user.sickLeaveDays ?? 0,
+    minorSickLeaveDays: user.minorSickLeaveDays ?? 12,
+    emergencyLeaveDays: user.emergencyLeaveDays ?? 3,
+    casualLeaveDays: user.casualLeaveDays ?? 12,
+    annualLeaveDays: user.annualLeaveDays ?? 10,
+    paternityLeaveDays: user.paternityLeaveDays ?? 3,
+    marriageLeaveDays: user.marriageLeaveDays ?? 3,
+    hajjLeaveDays: user.hajjLeaveDays ?? 40,
+    umrahLeaveDays: user.umrahLeaveDays ?? 0,
   });
 
   const managers = users.filter((item) => item.role === 'manager' || item.role === 'director' || item.role === 'admin');
@@ -197,17 +203,21 @@ function UserRow({
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {[
-              ['Sick Leave Days', 'sickLeaveDays'],
+              ['Minor Sick Leave Days', 'minorSickLeaveDays'],
               ['Emergency Leave Days', 'emergencyLeaveDays'],
-              ['Casual Leave Days', 'casualLeaveDays'],
+              ['Casual + Sick Pool', 'casualLeaveDays'],
               ['Annual Leave Days', 'annualLeaveDays'],
+              ['Paternity Leave Days', 'paternityLeaveDays'],
+              ['Marriage Leave Days', 'marriageLeaveDays'],
+              ['Hajj Calendar Days', 'hajjLeaveDays'],
+              ['Umrah Days', 'umrahLeaveDays'],
             ].map(([label, key]) => (
               <label key={key} className="block text-gray-600" style={{ fontSize: '12px', fontWeight: 500 }}>
                 {label}
                 <input
                   type="number"
                   min={0}
-                  value={form[key as 'sickLeaveDays' | 'emergencyLeaveDays' | 'casualLeaveDays' | 'annualLeaveDays']}
+                  value={form[key as 'minorSickLeaveDays' | 'emergencyLeaveDays' | 'casualLeaveDays' | 'annualLeaveDays' | 'paternityLeaveDays' | 'marriageLeaveDays' | 'hajjLeaveDays' | 'umrahLeaveDays']}
                   onChange={(event) => setForm((value) => ({ ...value, [key]: Number(event.target.value) }))}
                   className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
                   style={{ fontSize: '13px' }}
@@ -619,24 +629,7 @@ function PolicySettingsPanel() {
   const [open, setOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [policy, setPolicy] = useState<PolicySettings>({
-    defaultReportingTime: '09:00',
-    checkInGraceMinutes: 15,
-    globalReportingTime: '09:00',
-    globalGracePeriod: 15,
-    checkOutReminderTime: '19:00',
-    workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
-    weeklyOffDays: ['saturday', 'sunday'],
-    workWeekEffectiveFrom: new Date().toISOString().split('T')[0],
-    sickLeaveDays: 10,
-    emergencyLeaveDays: 5,
-    casualLeaveDays: 10,
-    annualLeaveDays: 14,
-    casualLeaveNoticeHours: 48,
-    annualLeaveNoticeHours: 48,
-    leavePolicyNotes:
-      'Sick leave can be used for medical illness or treatment and does not require advance notice.\nEmergency leave can be used for urgent personal or family situations and does not require advance notice.\nCasual leave is for planned short personal time away and requires advance notice.\nAnnual leave is for planned vacations or longer breaks and requires advance notice.',
-  });
+  const [policy, setPolicy] = useState<PolicySettings>(defaultPolicySettings());
 
   useEffect(() => {
     if (!open) return;
@@ -809,30 +802,37 @@ function PolicySettingsPanel() {
                 className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
               />
             </label>
-            {[
-              ['Default Sick Leave Days', 'sickLeaveDays'],
+            {[ 
+              ['Default Casual + Sick Pool', 'casualLeaveDays'],
+              ['Default Minor Sick Reference', 'minorSickLeaveDays'],
               ['Default Emergency Leave Days', 'emergencyLeaveDays'],
-              ['Default Casual Leave Days', 'casualLeaveDays'],
               ['Default Annual Leave Days', 'annualLeaveDays'],
+              ['Default Paternity Leave Days', 'paternityLeaveDays'],
+              ['Default Marriage Leave Days', 'marriageLeaveDays'],
+              ['Default Hajj Calendar Days', 'hajjLeaveDays'],
+              ['Default Umrah Days', 'umrahLeaveDays'],
+              ['Casual/Sick Monthly Cap', 'casualSickMonthlyCapDays'],
+              ['Late Arrivals per CL Deduction', 'lateConversionCount'],
+              ['Annual Eligibility Months', 'annualLeaveEligibilityMonths'],
             ].map(([label, key]) => (
               <label key={key} className="text-sm text-gray-600">
                 {label}
                 <input
                   type="number"
                   min={0}
-                  value={policy[key as 'sickLeaveDays' | 'emergencyLeaveDays' | 'casualLeaveDays' | 'annualLeaveDays']}
+                  value={policy[key as 'casualLeaveDays' | 'minorSickLeaveDays' | 'emergencyLeaveDays' | 'annualLeaveDays' | 'paternityLeaveDays' | 'marriageLeaveDays' | 'hajjLeaveDays' | 'umrahLeaveDays' | 'casualSickMonthlyCapDays' | 'lateConversionCount' | 'annualLeaveEligibilityMonths']}
                   onChange={(event) => setPolicy((value) => ({ ...value, [key]: Number(event.target.value) }))}
                   className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
                 />
               </label>
             ))}
             <label className="text-sm text-gray-600">
-              Annual Leave Notice Hours
+              Annual Notice Working Days
               <input
                 type="number"
                 min={0}
-                value={policy.annualLeaveNoticeHours}
-                onChange={(event) => setPolicy((value) => ({ ...value, annualLeaveNoticeHours: Number(event.target.value) }))}
+                value={policy.annualLeaveNoticeWorkingDays}
+                onChange={(event) => setPolicy((value) => ({ ...value, annualLeaveNoticeWorkingDays: Number(event.target.value) }))}
                 className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 outline-none focus:ring-2 focus:ring-green-500"
               />
             </label>
@@ -884,13 +884,18 @@ export default function UserManagement() {
     role: 'employee' as User['role'],
     project: '',
     position: '',
-    reportingTime: '09:00',
-    checkInGraceMinutes: 15,
-    checkOutReminderTime: '19:00',
-    sickLeaveDays: 10,
-    emergencyLeaveDays: 5,
-    casualLeaveDays: 10,
-    annualLeaveDays: 14,
+    reportingTime: '11:00',
+    checkInGraceMinutes: 0,
+    checkOutReminderTime: '20:00',
+    sickLeaveDays: 0,
+    minorSickLeaveDays: 12,
+    emergencyLeaveDays: 3,
+    casualLeaveDays: 12,
+    annualLeaveDays: 10,
+    paternityLeaveDays: 3,
+    marriageLeaveDays: 3,
+    hajjLeaveDays: 40,
+    umrahLeaveDays: 0,
     lineManagerId: '',
     projectManagerId: '',
     directorId: '',
@@ -933,13 +938,18 @@ export default function UserManagement() {
         role: 'employee',
         project: '',
         position: '',
-        reportingTime: '09:00',
-        checkInGraceMinutes: 15,
-        checkOutReminderTime: '19:00',
-        sickLeaveDays: 10,
-        emergencyLeaveDays: 5,
-        casualLeaveDays: 10,
-        annualLeaveDays: 14,
+        reportingTime: '11:00',
+        checkInGraceMinutes: 0,
+        checkOutReminderTime: '20:00',
+        sickLeaveDays: 0,
+        minorSickLeaveDays: 12,
+        emergencyLeaveDays: 3,
+        casualLeaveDays: 12,
+        annualLeaveDays: 10,
+        paternityLeaveDays: 3,
+        marriageLeaveDays: 3,
+        hajjLeaveDays: 40,
+        umrahLeaveDays: 0,
         lineManagerId: '',
         projectManagerId: '',
         directorId: '',
@@ -995,10 +1005,14 @@ export default function UserManagement() {
                 ['Reporting Time', 'reportingTime', 'time'],
                 ['Check-in Cutoff Minutes', 'checkInGraceMinutes', 'number'],
                 ['Check-out Reminder', 'checkOutReminderTime', 'time'],
-                ['Sick Leave Days', 'sickLeaveDays', 'number'],
+                ['Minor Sick Leave Days', 'minorSickLeaveDays', 'number'],
                 ['Emergency Leave Days', 'emergencyLeaveDays', 'number'],
-                ['Casual Leave Days', 'casualLeaveDays', 'number'],
+                ['Casual + Sick Pool', 'casualLeaveDays', 'number'],
                 ['Annual Leave Days', 'annualLeaveDays', 'number'],
+                ['Paternity Leave Days', 'paternityLeaveDays', 'number'],
+                ['Marriage Leave Days', 'marriageLeaveDays', 'number'],
+                ['Hajj Calendar Days', 'hajjLeaveDays', 'number'],
+                ['Umrah Days', 'umrahLeaveDays', 'number'],
               ].map(([label, key, type]) => (
                 <label key={key} className="text-sm text-gray-600">
                   {label}

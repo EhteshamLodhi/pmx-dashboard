@@ -208,7 +208,7 @@ async function runReminderJob(request: Request) {
   );
   const checkInNotifications = eligibleReminderUsers
     .flatMap((user) => {
-      const threshold = minutesFromTime(user.reporting_time ?? '09:00') + CHECKIN_REMINDER_AFTER_MINUTES;
+      const threshold = minutesFromTime(user.reporting_time ?? '11:00') + CHECKIN_REMINDER_AFTER_MINUTES;
       const record = attendanceByUser.get(user.id);
       if (!(nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave')) return [];
       const round = reminderRoundByMinutes(nowMinutes, threshold);
@@ -226,7 +226,7 @@ async function runReminderJob(request: Request) {
 
   const managerCheckInNotifications = eligibleReminderUsers
     .flatMap((user) => {
-      const threshold = minutesFromTime(user.reporting_time ?? '09:00') + CHECKIN_REMINDER_AFTER_MINUTES;
+      const threshold = minutesFromTime(user.reporting_time ?? '11:00') + CHECKIN_REMINDER_AFTER_MINUTES;
       const record = attendanceByUser.get(user.id);
       if (!(nowMinutes >= threshold && !record?.check_in_at && record?.status !== 'on-leave')) return [];
       const round = reminderRoundByMinutes(nowMinutes, threshold);
@@ -244,7 +244,7 @@ async function runReminderJob(request: Request) {
     .flatMap((user) => {
       const record = attendanceByUser.get(user.id);
       if (!(record?.check_in_at && !record?.check_out_at)) return [];
-      const thresholdMinutes = minutesFromTime(user.reporting_time ?? '09:00') + CHECKOUT_REMINDER_AFTER_HOURS * 60;
+      const thresholdMinutes = minutesFromTime(user.reporting_time ?? '11:00') + CHECKOUT_REMINDER_AFTER_HOURS * 60;
       if (thresholdMinutes > 23 * 60 + 59) return [];
       const thresholdTimestamp = localDateMinutesToUtc(workDate, thresholdMinutes).getTime();
       if (nowTimestamp < thresholdTimestamp) return [];
@@ -263,7 +263,7 @@ async function runReminderJob(request: Request) {
     .flatMap((user) => {
       const record = attendanceByUser.get(user.id);
       if (!(record?.check_in_at && !record?.check_out_at)) return [];
-      const thresholdMinutes = minutesFromTime(user.reporting_time ?? '09:00') + CHECKOUT_REMINDER_AFTER_HOURS * 60;
+      const thresholdMinutes = minutesFromTime(user.reporting_time ?? '11:00') + CHECKOUT_REMINDER_AFTER_HOURS * 60;
       if (thresholdMinutes > 23 * 60 + 59) return [];
       const thresholdTimestamp = localDateMinutesToUtc(workDate, thresholdMinutes).getTime();
       if (nowTimestamp < thresholdTimestamp) return [];

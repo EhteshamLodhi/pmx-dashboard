@@ -11,7 +11,7 @@ begin
   end if;
 
   if not exists (select 1 from pg_type where typname = 'leave_type' and typnamespace = 'public'::regnamespace) then
-    create type public.leave_type as enum ('sick', 'casual', 'annual');
+    create type public.leave_type as enum ('sick', 'minor_sick', 'emergency', 'casual', 'annual', 'paternity', 'marriage', 'hajj', 'umrah');
   end if;
 
   if not exists (select 1 from pg_type where typname = 'leave_status' and typnamespace = 'public'::regnamespace) then
@@ -33,6 +33,11 @@ end
 $$;
 
 alter type public.leave_type add value if not exists 'emergency';
+alter type public.leave_type add value if not exists 'minor_sick';
+alter type public.leave_type add value if not exists 'paternity';
+alter type public.leave_type add value if not exists 'marriage';
+alter type public.leave_type add value if not exists 'hajj';
+alter type public.leave_type add value if not exists 'umrah';
 alter type public.leave_status add value if not exists 'pending_project_manager';
 alter type public.attendance_status add value if not exists 'half-day';
 alter type public.attendance_status add value if not exists 'holiday';
@@ -54,13 +59,18 @@ create table if not exists public.users (
   email text not null unique,
   role public.user_role not null default 'employee',
   project_id uuid references public.projects(id) on delete set null,
-  reporting_time time not null default '09:00',
-  check_in_grace_minutes integer not null default 15,
-  check_out_reminder_time time not null default '19:00',
-  sick_leave_days integer not null default 10,
-  emergency_leave_days integer not null default 5,
-  casual_leave_days integer not null default 10,
-  annual_leave_days integer not null default 14,
+  reporting_time time not null default '11:00',
+  check_in_grace_minutes integer not null default 0,
+  check_out_reminder_time time not null default '20:00',
+  sick_leave_days integer not null default 0,
+  minor_sick_leave_days integer not null default 12,
+  emergency_leave_days integer not null default 3,
+  casual_leave_days integer not null default 12,
+  annual_leave_days integer not null default 10,
+  paternity_leave_days integer not null default 3,
+  marriage_leave_days integer not null default 3,
+  hajj_leave_days integer not null default 40,
+  umrah_leave_days integer not null default 0,
   line_manager_id uuid references public.users(id) on delete set null,
   project_manager_id uuid references public.users(id) on delete set null,
   director_id uuid references public.users(id) on delete set null,
@@ -72,12 +82,24 @@ create table if not exists public.users (
 );
 
 alter table public.users drop column if exists department_id;
-alter table public.users add column if not exists check_in_grace_minutes integer not null default 15;
-alter table public.users add column if not exists check_out_reminder_time time not null default '19:00';
-alter table public.users add column if not exists sick_leave_days integer not null default 10;
-alter table public.users add column if not exists emergency_leave_days integer not null default 5;
-alter table public.users add column if not exists casual_leave_days integer not null default 10;
-alter table public.users add column if not exists annual_leave_days integer not null default 14;
+alter table public.users alter column reporting_time set default '11:00';
+alter table public.users alter column check_in_grace_minutes set default 0;
+alter table public.users alter column check_out_reminder_time set default '20:00';
+alter table public.users alter column sick_leave_days set default 0;
+alter table public.users alter column emergency_leave_days set default 3;
+alter table public.users alter column casual_leave_days set default 12;
+alter table public.users alter column annual_leave_days set default 10;
+alter table public.users add column if not exists check_in_grace_minutes integer not null default 0;
+alter table public.users add column if not exists check_out_reminder_time time not null default '20:00';
+alter table public.users add column if not exists sick_leave_days integer not null default 0;
+alter table public.users add column if not exists minor_sick_leave_days integer not null default 12;
+alter table public.users add column if not exists emergency_leave_days integer not null default 3;
+alter table public.users add column if not exists casual_leave_days integer not null default 12;
+alter table public.users add column if not exists annual_leave_days integer not null default 10;
+alter table public.users add column if not exists paternity_leave_days integer not null default 3;
+alter table public.users add column if not exists marriage_leave_days integer not null default 3;
+alter table public.users add column if not exists hajj_leave_days integer not null default 40;
+alter table public.users add column if not exists umrah_leave_days integer not null default 0;
 
 drop table if exists public.departments;
 
@@ -223,25 +245,39 @@ alter table public.holidays
 
 create table if not exists public.attendance_settings (
   id uuid primary key default gen_random_uuid(),
-  default_reporting_time time not null default '09:00',
-  check_in_grace_minutes integer not null default 15,
-  global_reporting_time time not null default '09:00',
-  global_grace_period integer not null default 15,
-  check_out_reminder_time time not null default '19:00',
+  policy_effective_date date not null default '2026-06-15',
+  default_reporting_time time not null default '11:00',
+  check_in_grace_minutes integer not null default 0,
+  global_reporting_time time not null default '11:00',
+  global_grace_period integer not null default 0,
+  check_out_reminder_time time not null default '20:00',
+  closing_time time not null default '20:00',
   working_days text[] not null default array['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
   weekly_off_days text[] not null default array['saturday', 'sunday'],
-  work_week_effective_from date not null default current_date,
+  work_week_effective_from date not null default '2026-06-15',
   minimum_leave_notice_hours integer not null default 48,
-  sick_leave_days integer not null default 10,
-  emergency_leave_days integer not null default 5,
-  casual_leave_days integer not null default 10,
-  annual_leave_days integer not null default 14,
-  casual_leave_notice_hours integer not null default 48,
-  annual_leave_notice_hours integer not null default 48,
-  leave_policy_notes text not null default 'Sick leave can be used for medical illness or treatment and does not require advance notice.
-Emergency leave can be used for urgent personal or family situations and does not require advance notice.
-Casual leave is for planned short personal time away and requires advance notice.
-Annual leave is for planned vacations or longer breaks and requires advance notice.',
+  sick_leave_days integer not null default 0,
+  minor_sick_leave_days integer not null default 12,
+  emergency_leave_days integer not null default 3,
+  casual_leave_days integer not null default 12,
+  annual_leave_days integer not null default 10,
+  paternity_leave_days integer not null default 3,
+  marriage_leave_days integer not null default 3,
+  hajj_leave_days integer not null default 40,
+  umrah_leave_days integer not null default 0,
+  casual_sick_monthly_cap_days integer not null default 2,
+  late_conversion_count integer not null default 3,
+  annual_leave_eligibility_months integer not null default 12,
+  casual_leave_notice_hours integer not null default 0,
+  annual_leave_notice_hours integer not null default 360,
+  annual_leave_notice_working_days integer not null default 15,
+  leave_policy_notes text not null default 'Policy effective 15 June 2026.
+Office timing is 11:00 AM to 8:00 PM. Any check-in after 11:00 AM is late unless approved.
+Annual leave is 10 working days after 1 continuous year of service and requires 15 working days advance notice.
+Casual leave and minor sick leave share a combined 12 working day annual pool, with a 2 day monthly cap unless specially approved.
+Emergency, paternity, and marriage leave allow up to 3 working days. Hajj leave allows up to 40 calendar days subject to approval. Umrah leave is case-by-case.
+Unused leave lapses at year end and is not encashable.
+Leave approval chain is Line Manager -> Director.',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -347,32 +383,84 @@ values
   ('Miscellaneous')
 on conflict (name) do nothing;
 
-alter table public.attendance_settings add column if not exists default_reporting_time time not null default '09:00';
-alter table public.attendance_settings add column if not exists global_reporting_time time not null default '09:00';
-alter table public.attendance_settings add column if not exists global_grace_period integer not null default 15;
+alter table public.attendance_settings add column if not exists policy_effective_date date not null default '2026-06-15';
+alter table public.attendance_settings add column if not exists closing_time time not null default '20:00';
+alter table public.attendance_settings alter column default_reporting_time set default '11:00';
+alter table public.attendance_settings alter column check_in_grace_minutes set default 0;
+alter table public.attendance_settings alter column check_out_reminder_time set default '20:00';
+alter table public.attendance_settings add column if not exists default_reporting_time time not null default '11:00';
+alter table public.attendance_settings add column if not exists global_reporting_time time not null default '11:00';
+alter table public.attendance_settings add column if not exists global_grace_period integer not null default 0;
 alter table public.attendance_settings add column if not exists working_days text[] not null default array['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
 alter table public.attendance_settings add column if not exists weekly_off_days text[] not null default array['saturday', 'sunday'];
-alter table public.attendance_settings add column if not exists work_week_effective_from date not null default current_date;
+alter table public.attendance_settings add column if not exists work_week_effective_from date not null default '2026-06-15';
 alter table public.attendance_settings add column if not exists minimum_leave_notice_hours integer not null default 48;
-alter table public.attendance_settings add column if not exists sick_leave_days integer not null default 10;
-alter table public.attendance_settings add column if not exists emergency_leave_days integer not null default 5;
-alter table public.attendance_settings add column if not exists casual_leave_days integer not null default 10;
-alter table public.attendance_settings add column if not exists annual_leave_days integer not null default 14;
-alter table public.attendance_settings add column if not exists casual_leave_notice_hours integer not null default 48;
-alter table public.attendance_settings add column if not exists annual_leave_notice_hours integer not null default 48;
-alter table public.attendance_settings add column if not exists leave_policy_notes text not null default 'Sick leave can be used for medical illness or treatment and does not require advance notice.
-Emergency leave can be used for urgent personal or family situations and does not require advance notice.
-Casual leave is for planned short personal time away and requires advance notice.
-Annual leave is for planned vacations or longer breaks and requires advance notice.';
+alter table public.attendance_settings add column if not exists sick_leave_days integer not null default 0;
+alter table public.attendance_settings add column if not exists minor_sick_leave_days integer not null default 12;
+alter table public.attendance_settings add column if not exists emergency_leave_days integer not null default 3;
+alter table public.attendance_settings add column if not exists casual_leave_days integer not null default 12;
+alter table public.attendance_settings add column if not exists annual_leave_days integer not null default 10;
+alter table public.attendance_settings add column if not exists paternity_leave_days integer not null default 3;
+alter table public.attendance_settings add column if not exists marriage_leave_days integer not null default 3;
+alter table public.attendance_settings add column if not exists hajj_leave_days integer not null default 40;
+alter table public.attendance_settings add column if not exists umrah_leave_days integer not null default 0;
+alter table public.attendance_settings add column if not exists casual_sick_monthly_cap_days integer not null default 2;
+alter table public.attendance_settings add column if not exists late_conversion_count integer not null default 3;
+alter table public.attendance_settings add column if not exists annual_leave_eligibility_months integer not null default 12;
+alter table public.attendance_settings add column if not exists casual_leave_notice_hours integer not null default 0;
+alter table public.attendance_settings add column if not exists annual_leave_notice_hours integer not null default 360;
+alter table public.attendance_settings add column if not exists annual_leave_notice_working_days integer not null default 15;
+alter table public.attendance_settings add column if not exists leave_policy_notes text not null default 'Policy effective 15 June 2026.
+Office timing is 11:00 AM to 8:00 PM. Any check-in after 11:00 AM is late unless approved.
+Annual leave is 10 working days after 1 continuous year of service and requires 15 working days advance notice.
+Casual leave and minor sick leave share a combined 12 working day annual pool, with a 2 day monthly cap unless specially approved.
+Emergency, paternity, and marriage leave allow up to 3 working days. Hajj leave allows up to 40 calendar days subject to approval. Umrah leave is case-by-case.
+Unused leave lapses at year end and is not encashable.
+Leave approval chain is Line Manager -> Director.';
 
 insert into public.attendance_settings (default_reporting_time, check_in_grace_minutes, check_out_reminder_time)
-select '09:00', 15, '19:00'
+select '11:00', 0, '20:00'
 where not exists (select 1 from public.attendance_settings);
 
 update public.attendance_settings
 set
-  global_reporting_time = coalesce(global_reporting_time, default_reporting_time, '09:00'),
-  global_grace_period = coalesce(global_grace_period, check_in_grace_minutes, 15);
+  policy_effective_date = coalesce(policy_effective_date, '2026-06-15'),
+  default_reporting_time = coalesce(default_reporting_time, '11:00'),
+  global_reporting_time = coalesce(global_reporting_time, default_reporting_time, '11:00'),
+  check_in_grace_minutes = coalesce(check_in_grace_minutes, 0),
+  global_grace_period = coalesce(global_grace_period, check_in_grace_minutes, 0),
+  check_out_reminder_time = coalesce(check_out_reminder_time, '20:00'),
+  closing_time = coalesce(closing_time, check_out_reminder_time, '20:00'),
+  casual_leave_days = coalesce(casual_leave_days, 12),
+  annual_leave_days = coalesce(annual_leave_days, 10),
+  emergency_leave_days = coalesce(emergency_leave_days, 3),
+  minor_sick_leave_days = coalesce(minor_sick_leave_days, 12),
+  paternity_leave_days = coalesce(paternity_leave_days, 3),
+  marriage_leave_days = coalesce(marriage_leave_days, 3),
+  hajj_leave_days = coalesce(hajj_leave_days, 40),
+  umrah_leave_days = coalesce(umrah_leave_days, 0),
+  casual_sick_monthly_cap_days = coalesce(casual_sick_monthly_cap_days, 2),
+  late_conversion_count = coalesce(late_conversion_count, 3),
+  annual_leave_eligibility_months = coalesce(annual_leave_eligibility_months, 12),
+  casual_leave_notice_hours = coalesce(casual_leave_notice_hours, 0),
+  annual_leave_notice_hours = coalesce(annual_leave_notice_hours, 360),
+  annual_leave_notice_working_days = coalesce(annual_leave_notice_working_days, 15);
+
+update public.attendance_settings
+set
+  default_reporting_time = case when default_reporting_time = '09:00' then '11:00' else default_reporting_time end,
+  global_reporting_time = case when global_reporting_time = '09:00' then '11:00' else global_reporting_time end,
+  check_in_grace_minutes = case when check_in_grace_minutes = 15 then 0 else check_in_grace_minutes end,
+  global_grace_period = case when global_grace_period = 15 then 0 else global_grace_period end,
+  check_out_reminder_time = case when check_out_reminder_time = '19:00' then '20:00' else check_out_reminder_time end,
+  closing_time = case when closing_time = '19:00' then '20:00' else closing_time end,
+  sick_leave_days = case when sick_leave_days = 10 then 0 else sick_leave_days end,
+  emergency_leave_days = case when emergency_leave_days = 5 then 3 else emergency_leave_days end,
+  casual_leave_days = case when casual_leave_days = 10 then 12 else casual_leave_days end,
+  annual_leave_days = case when annual_leave_days = 14 then 10 else annual_leave_days end,
+  casual_leave_notice_hours = case when casual_leave_notice_hours = 48 then 0 else casual_leave_notice_hours end,
+  annual_leave_notice_hours = case when annual_leave_notice_hours = 48 then 360 else annual_leave_notice_hours end,
+  annual_leave_notice_working_days = case when annual_leave_notice_working_days = 2 then 15 else annual_leave_notice_working_days end;
 
 alter table public.approval_workflow drop constraint if exists approval_workflow_approval_level_check;
 alter table public.approval_workflow

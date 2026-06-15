@@ -5,7 +5,6 @@ import { tryCreateNotification, tryCreateNotifications, tryCreateRoleNotificatio
 
 const allowedFileTypes = new Set(['application/pdf', 'image/jpeg', 'image/jpg', 'image/png']);
 const bucketName = 'reimbursement-receipts';
-const highValueThreshold = Number(process.env.REIMBURSEMENT_HIGH_VALUE_THRESHOLD ?? '10000');
 
 function money(amount: number, currency = 'PKR') {
   return `${currency} ${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
@@ -14,7 +13,7 @@ function money(amount: number, currency = 'PKR') {
 function selectQuery() {
   return `
     *,
-    employee:employee_id(full_name, project:project_id(name)),
+    employee:employee_id(full_name, director_id, project:project_id(name)),
     category:category_id(name),
     reimbursement_attachments(*),
     reimbursement_approvals(
@@ -95,6 +94,86 @@ async function fetchRequest(admin: ReturnType<typeof createAdminClient>, reimbur
   return data as any;
 }
 
+async function getAdminApprover(admin: ReturnType<typeof createAdminClient>) {
+  const { data, error } = await admin
+    .from('users')
+    .select('id')
+    .eq('role', 'admin')
+    .eq('is_active', true)
+    .order('full_name')
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+async function repairLegacyWorkflow(admin: ReturnType<typeof createAdminClient>, request: any) {
+  if (['paid', 'rejected', 'cancelled'].includes(String(request.status))) return request;
+
+  const adminApprover = await getAdminApprover(admin);
+  const directorId = request.employee?.director_id;
+  if (!adminApprover?.id || !directorId) return request;
+
+  const approvals = request.reimbursement_approvals ?? [];
+  const firstStep = approvals.find((approval: any) => approval.approval_level === 1);
+  const secondStep = approvals.find((approval: any) => approval.approval_level === 2);
+  const firstStepIsAdmin = firstStep?.approver_role === 'Admin';
+  const secondStepIsDirector = secondStep?.approver_role === 'Director';
+  const shouldRepairFirstStep =
+    !firstStep ||
+    firstStep.approver_role !== 'Admin' ||
+    (firstStep.status === 'pending' && firstStep.approver_id !== adminApprover.id);
+  const shouldRepairSecondStep =
+    !secondStep ||
+    secondStep.approver_role !== 'Director' ||
+    (secondStep.status === 'pending' && secondStep.approver_id !== directorId);
+
+  if (!shouldRepairFirstStep && !shouldRepairSecondStep) return request;
+
+  const rows = [];
+  if (shouldRepairFirstStep) {
+    rows.push({
+      reimbursement_id: request.id,
+      approval_level: 1,
+      approver_id: adminApprover.id,
+      approver_role: 'Admin',
+      status: firstStepIsAdmin ? firstStep.status : 'pending',
+      comment: firstStepIsAdmin ? firstStep.comment ?? null : null,
+      acted_at: firstStepIsAdmin ? firstStep.acted_at ?? null : null,
+    });
+  }
+  if (shouldRepairSecondStep) {
+    rows.push({
+      reimbursement_id: request.id,
+      approval_level: 2,
+      approver_id: directorId,
+      approver_role: 'Director',
+      status: secondStepIsDirector ? secondStep.status : 'pending',
+      comment: secondStepIsDirector ? secondStep.comment ?? null : null,
+      acted_at: secondStepIsDirector ? secondStep.acted_at ?? null : null,
+    });
+  }
+
+  const { error } = await admin
+    .from('reimbursement_approvals')
+    .upsert(rows, { onConflict: 'reimbursement_id,approval_level' });
+
+  if (error) {
+    console.warn('Unable to repair legacy reimbursement workflow', { reimbursementId: request.id, error: error.message });
+    return request;
+  }
+
+  if (!firstStepIsAdmin && request.status === 'pending_director') {
+    await admin
+      .from('reimbursement_requests')
+      .update({ status: 'pending_manager' })
+      .eq('id', request.id);
+  }
+
+  return fetchRequest(admin, request.id);
+}
+
 async function ensureReceiptBucket(admin: ReturnType<typeof createAdminClient>) {
   const { error } = await admin.storage.createBucket(bucketName, {
     public: false,
@@ -133,8 +212,10 @@ export async function GET() {
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  const repairedRequests = await Promise.all(((data ?? []) as any[]).map((request) => repairLegacyWorkflow(admin, request)));
+
   const withSignedAttachments = await Promise.all(
-    ((data ?? []) as any[]).map(async (request) => ({
+    repairedRequests.map(async (request) => ({
       ...request,
       reimbursement_attachments: await Promise.all(
         (request.reimbursement_attachments ?? []).map(async (attachment: { file_path: string }) => ({
@@ -161,11 +242,16 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
   const actor = await getActor(admin, authResult.user.id);
   if (!actor) return NextResponse.json({ error: 'User profile is not configured.' }, { status: 400 });
-  if (!actor.line_manager_id) {
+  if (!actor.director_id) {
     return NextResponse.json(
-      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a line manager.' },
+      { error: 'Your reporting hierarchy is incomplete. Ask an admin to assign a director.' },
       { status: 400 },
     );
+  }
+
+  const adminApprover = await getAdminApprover(admin);
+  if (!adminApprover) {
+    return NextResponse.json({ error: 'No active admin approver is configured for reimbursements.' }, { status: 400 });
   }
 
   const formData = await request.formData();
@@ -213,8 +299,15 @@ export async function POST(request: Request) {
     {
       reimbursement_id: created.id,
       approval_level: 1,
-      approver_id: actor.line_manager_id,
-      approver_role: 'Line Manager',
+      approver_id: adminApprover.id,
+      approver_role: 'Admin',
+      status: 'pending',
+    },
+    {
+      reimbursement_id: created.id,
+      approval_level: 2,
+      approver_id: actor.director_id,
+      approver_role: 'Director',
       status: 'pending',
     },
   ];
@@ -259,26 +352,15 @@ export async function POST(request: Request) {
       link: '/reimbursements',
       sourceKey: `reimbursement-submitted:${created.id}:employee`,
     },
-    {
-      userId: actor.line_manager_id,
-      category: 'approval',
-      title: 'Reimbursement approval pending',
-      message: `New reimbursement request submitted by ${actor.full_name} for ${money(amount, currency)}.`,
-      link: '/reimbursements',
-      sourceKey: `reimbursement-submitted:${created.id}:manager`,
-    },
   ]);
 
-  if (amount >= highValueThreshold) {
-    await tryCreateNotification(admin, {
-      userId: actor.director_id,
-      category: 'reimbursement',
-      title: 'High-value reimbursement alert',
-      message: `High-value reimbursement request submitted by ${actor.full_name} for ${money(amount, currency)}.`,
-      link: '/reimbursements',
-      sourceKey: `reimbursement-high-value:${created.id}:director`,
-    });
-  }
+  await tryCreateRoleNotification(admin, ['admin'], {
+    category: 'approval',
+    title: 'Reimbursement approval pending',
+    message: `New reimbursement request submitted by ${actor.full_name} for ${money(amount, currency)}.`,
+    link: '/reimbursements',
+    sourceKey: `reimbursement-submitted:${created.id}:admin`,
+  });
 
   const data = await fetchRequest(admin, created.id);
   return NextResponse.json({ data }, { status: 201 });
@@ -349,9 +431,14 @@ export async function PATCH(request: Request) {
 
     const { data: reimbursement } = await admin
       .from('reimbursement_requests')
-      .select('employee_id, amount, currency, request_number')
+      .select('employee_id, amount, currency, request_number, status')
       .eq('id', reimbursementId)
       .maybeSingle();
+
+    if (!reimbursement) return NextResponse.json({ error: 'Reimbursement request was not found.' }, { status: 404 });
+    if (reimbursement.status !== 'approved') {
+      return NextResponse.json({ error: 'Only director-approved reimbursements can be marked as paid.' }, { status: 400 });
+    }
 
     const { error: paymentError } = await admin.from('reimbursement_payments').upsert({
       reimbursement_id: reimbursementId,
@@ -366,28 +453,15 @@ export async function PATCH(request: Request) {
     if (paymentError) return NextResponse.json({ error: paymentError.message }, { status: 400 });
 
     await admin.from('reimbursement_requests').update({ status: 'paid', updated_by: actor.id }).eq('id', reimbursementId);
-    await admin
-      .from('reimbursement_approvals')
-      .upsert({
-        reimbursement_id: reimbursementId,
-        approval_level: 2,
-        approver_id: actor.id,
-        approver_role: 'Finance/Admin',
-        status: 'approved',
-        comment: String(body.remarks ?? '').trim() || 'Payment processed',
-        acted_at: new Date().toISOString(),
-      }, { onConflict: 'reimbursement_id,approval_level' });
 
-    if (reimbursement) {
-      await tryCreateNotification(admin, {
-        userId: reimbursement.employee_id,
-        category: 'reimbursement',
-        title: 'Reimbursement paid',
-        message: `Your reimbursement ${reimbursement.request_number} for ${money(Number(reimbursement.amount), reimbursement.currency)} has been marked as paid.`,
-        link: '/reimbursements',
-        sourceKey: `reimbursement-paid:${reimbursementId}:employee`,
-      });
-    }
+    await tryCreateNotification(admin, {
+      userId: reimbursement.employee_id,
+      category: 'reimbursement',
+      title: 'Reimbursement paid',
+      message: `Your reimbursement ${reimbursement.request_number} for ${money(Number(reimbursement.amount), reimbursement.currency)} has been marked as paid.`,
+      link: '/reimbursements',
+      sourceKey: `reimbursement-paid:${reimbursementId}:employee`,
+    });
 
     return NextResponse.json({ data: await fetchRequest(admin, reimbursementId) });
   }
@@ -409,18 +483,6 @@ export async function PATCH(request: Request) {
 
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 400 });
 
-    await admin
-      .from('reimbursement_approvals')
-      .upsert({
-        reimbursement_id: reimbursementId,
-        approval_level: 2,
-        approver_id: actor.id,
-        approver_role: 'Finance/Admin',
-        status: 'pending',
-        comment: 'Marked as remaining / pending payment',
-        acted_at: null,
-      }, { onConflict: 'reimbursement_id,approval_level' });
-
     if (reimbursement) {
       await tryCreateNotification(admin, {
         userId: reimbursement.employee_id,
@@ -436,14 +498,11 @@ export async function PATCH(request: Request) {
   }
 
   if (action === 'approval') {
-    const level = Number(body.level) as 1;
+    const level = Number(body.level) as 1 | 2;
     const decision = String(body.decision ?? '');
     const comment = String(body.comment ?? '').trim();
-    if (level !== 1 || !['approved', 'rejected', 'more_info'].includes(decision)) {
+    if (![1, 2].includes(level) || !['approved', 'rejected', 'more_info'].includes(decision)) {
       return NextResponse.json({ error: 'Invalid reimbursement approval payload.' }, { status: 400 });
-    }
-    if (actor.role !== 'manager') {
-      return NextResponse.json({ error: 'Only the assigned manager can approve or reject reimbursements.' }, { status: 403 });
     }
     if ((decision === 'rejected' || decision === 'more_info') && !comment) {
       return NextResponse.json({ error: 'Comments are required for rejection or more information requests.' }, { status: 400 });
@@ -459,8 +518,11 @@ export async function PATCH(request: Request) {
 
     const currentStep = steps.find((step) => step.approval_level === level);
     if (!currentStep) return NextResponse.json({ error: 'Approval step was not found.' }, { status: 404 });
-    if (actor.role !== 'admin' && currentStep.approver_id !== actor.id) {
-      return NextResponse.json({ error: 'You are not assigned to this approval step.' }, { status: 403 });
+    const canAct =
+      (level === 1 && actor.role === 'admin') ||
+      (level === 2 && actor.role === 'director' && currentStep.approver_id === actor.id);
+    if (!canAct) {
+      return NextResponse.json({ error: 'You are not assigned to this reimbursement approval step.' }, { status: 403 });
     }
     if (currentStep.status !== 'pending') {
       return NextResponse.json({ error: 'This approval step has already been completed.' }, { status: 400 });
@@ -471,7 +533,9 @@ export async function PATCH(request: Request) {
 
     const nextStatus =
       decision === 'approved'
-        ? 'approved'
+        ? level === 1
+          ? 'pending_director'
+          : 'approved'
         : decision === 'rejected'
           ? 'rejected'
           : 'more_info';
@@ -487,6 +551,8 @@ export async function PATCH(request: Request) {
     const { error: approvalError } = await admin
       .from('reimbursement_approvals')
       .update({
+        approver_id: actor.id,
+        approver_role: level === 1 ? 'Admin' : 'Director',
         status: decision,
         comment: comment || null,
         acted_at: actedAt,
@@ -500,21 +566,27 @@ export async function PATCH(request: Request) {
       .update({ status: nextStatus, decided_at: ['approved', 'rejected'].includes(nextStatus) ? actedAt : null, updated_by: actor.id })
       .eq('id', reimbursementId);
 
-    if (decision === 'approved') {
-      await admin
-        .from('reimbursement_approvals')
-        .delete()
-        .eq('reimbursement_id', reimbursementId)
-        .gt('approval_level', 1);
+    if (reimbursement && decision === 'approved' && level === 1) {
+      const directorId = reimbursement.employee?.director_id;
+      if (directorId) {
+        await tryCreateNotification(admin, {
+          userId: directorId,
+          category: 'approval',
+          title: 'Director reimbursement approval pending',
+          message: `Reimbursement ${reimbursement.request_number} for ${money(Number(reimbursement.amount), reimbursement.currency)} is waiting for director approval.`,
+          link: '/approvals',
+          sourceKey: `reimbursement-admin-approved:${reimbursementId}:director`,
+        });
+      }
     }
 
-    if (reimbursement && decision === 'approved') {
+    if (reimbursement && decision === 'approved' && level === 2) {
       await tryCreateRoleNotification(admin, ['admin'], {
         category: 'reimbursement',
         title: 'Reimbursement awaiting payment',
-        message: `Approved reimbursement ${reimbursement.request_number} for ${money(Number(reimbursement.amount), reimbursement.currency)} is ready for payment.`,
+        message: `Director-approved reimbursement ${reimbursement.request_number} for ${money(Number(reimbursement.amount), reimbursement.currency)} is ready for payment.`,
         link: '/reimbursements',
-        sourceKey: `reimbursement-approved:${reimbursementId}:admin`,
+        sourceKey: `reimbursement-director-approved:${reimbursementId}:admin`,
       });
     }
 
@@ -527,15 +599,19 @@ export async function PATCH(request: Request) {
             ? 'Reimbursement rejected'
             : decision === 'more_info'
               ? 'Reimbursement needs more information'
-              : 'Reimbursement approved',
+              : level === 2
+                ? 'Reimbursement approved'
+                : 'Reimbursement sent to director',
         message:
           decision === 'rejected'
             ? `Your reimbursement ${reimbursement.request_number} was rejected.`
             : decision === 'more_info'
               ? `More information is required for reimbursement ${reimbursement.request_number}.`
-              : `Your reimbursement ${reimbursement.request_number} was approved and is awaiting payment.`,
+              : level === 2
+                ? `Your reimbursement ${reimbursement.request_number} was approved and is awaiting payment.`
+                : `Your reimbursement ${reimbursement.request_number} was approved by admin and sent to director.`,
         link: '/reimbursements',
-        sourceKey: `reimbursement-decision:${reimbursementId}:${decision}:employee`,
+        sourceKey: `reimbursement-decision:${reimbursementId}:${level}:${decision}:employee`,
       });
     }
 

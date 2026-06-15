@@ -36,6 +36,7 @@ import {
 import { getNonWorkingStatus } from '@/lib/attendance-calendar';
 import { getVisibleUsersForHierarchy } from '@/lib/hierarchy';
 import { mapReimbursementRequest } from '@/lib/supabase/mappers';
+import { calculateEmployeePolicyStats } from '@/lib/leave-balances';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -297,6 +298,10 @@ export default function EmployeeInsights() {
   const selectedLeaves = useMemo(
     () => leaveRequests.filter((request) => request.userId === selectedUser?.id),
     [leaveRequests, selectedUser?.id],
+  );
+  const policyStats = useMemo(
+    () => selectedUser ? calculateEmployeePolicyStats({ user: selectedUser, attendanceRecords, leaveRequests, policy }) : null,
+    [attendanceRecords, leaveRequests, policy, selectedUser],
   );
   const filteredLeaves = useMemo(
     () => selectedLeaves.filter((request) => request.startDate <= rangeBounds.end && request.endDate >= rangeBounds.start),
@@ -602,6 +607,11 @@ export default function EmployeeInsights() {
           <MetricCard label="Last Month" value={formatHours(lastMonthHours)} tone="blue" />
           <MetricCard label="Attendance %" value={`${attendancePercentage}%`} />
           <MetricCard label="Late %" value={`${latePercentage}%`} tone="orange" />
+          <MetricCard label="Total Late Arrivals" value={policyStats?.totalLateArrivals ?? 0} tone="orange" />
+          <MetricCard label="Late This Month" value={policyStats?.lateArrivalsThisMonth ?? 0} tone="orange" />
+          <MetricCard label="Late This Year" value={policyStats?.lateArrivalsThisYear ?? 0} tone="orange" />
+          <MetricCard label="Casual Deducted" value={policyStats?.casualLeavesDeductedDueToLate ?? 0} tone="red" />
+          <MetricCard label="Payroll Deductions" value={policyStats?.pendingPayrollDeductions ?? 0} tone={policyStats?.payrollDeductionRequired ? 'red' : 'gray'} />
           <MetricCard label="Early Departure %" value={`${earlyDeparturePercentage}%`} tone="orange" />
           <MetricCard label="Missed Check-Out" value={missedCheckOuts} tone="red" />
           <MetricCard label="Missed Check-In" value={missedCheckIns} tone="red" />
@@ -616,10 +626,13 @@ export default function EmployeeInsights() {
           <h2 className="text-gray-900 font-bold text-lg">Leave Analytics</h2>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
-          <MetricCard label="Leave Balance" value={Math.max(0, totalLeaveBalance - leavesTaken)} />
-          <MetricCard label="Sick Remaining" value={Math.max(0, (selectedUser.sickLeaveDays ?? 0) - leaveTotals.sick)} tone="red" />
-          <MetricCard label="Casual Remaining" value={Math.max(0, (selectedUser.casualLeaveDays ?? 0) - leaveTotals.casual)} tone="blue" />
-          <MetricCard label="Annual Remaining" value={Math.max(0, (selectedUser.annualLeaveDays ?? 0) - leaveTotals.annual)} tone="gray" />
+          <MetricCard label="Leave Balance" value={(policyStats?.leave.annual.remaining ?? 0) + (policyStats?.leave.casual.remaining ?? 0) + (policyStats?.leave.emergency.remaining ?? 0)} />
+          <MetricCard label="Sick Remaining" value={policyStats?.leave.sick.remaining ?? 0} tone="red" />
+          <MetricCard label="Casual Remaining" value={policyStats?.leave.casual.remaining ?? 0} tone="blue" />
+          <MetricCard label="Annual Remaining" value={policyStats?.leave.annual.remaining ?? 0} tone="gray" />
+          <MetricCard label="Emergency Remaining" value={policyStats?.leave.emergency.remaining ?? 0} tone="red" />
+          <MetricCard label="Marriage Remaining" value={policyStats?.leave.marriage.remaining ?? 0} tone="blue" />
+          <MetricCard label="Paternity Remaining" value={policyStats?.leave.paternity.remaining ?? 0} tone="blue" />
           <MetricCard label="Leaves Taken" value={leavesTaken} />
           <MetricCard label="Used This Month" value={approvedLeaves.filter((request) => request.startDate.slice(0, 7) === monthKey(TODAY)).reduce((sum, request) => sum + request.totalDays, 0)} />
           <MetricCard label="Used This Year" value={yearLeaves.filter((request) => request.status === 'approved').reduce((sum, request) => sum + request.totalDays, 0)} />
@@ -628,7 +641,7 @@ export default function EmployeeInsights() {
           <MetricCard label="Rejected" value={selectedLeaves.filter((request) => request.status === 'rejected').length} tone="red" />
           <MetricCard label="Approved" value={approvedLeaves.length} />
           <MetricCard label="Cancelled" value={0} tone="gray" />
-          <MetricCard label="Utilization" value={`${percent(leavesTaken, totalLeaveBalance)}%`} tone="orange" />
+          <MetricCard label="Utilization" value={`${percent(leavesTaken, Math.max(1, totalLeaveBalance))}%`} tone="orange" />
           <MetricCard label="Next Leave" value={upcomingLeaves[0] ? dateLabel(upcomingLeaves[0].startDate) : '-'} tone="blue" />
         </div>
       </section>

@@ -5,24 +5,22 @@ import { CalendarDays, PlusCircle, Clock, CheckCircle2, XCircle, ChevronRight, I
 import { useApp } from '../context/AppContext';
 import { LeaveType, LeaveRequest, PolicySettings } from '../types';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
+import { defaultPolicySettings, getLeaveTypeLabel, LEAVE_TYPES } from '@/lib/powermatix-policy';
+import { calculateEmployeePolicyStats } from '@/lib/leave-balances';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
-function getLeaveTypeLabel(type: LeaveType) {
-  switch (type) {
-    case 'sick': return 'Sick Leave';
-    case 'emergency': return 'Emergency Leave';
-    case 'casual': return 'Casual Leave';
-    case 'annual': return 'Annual Leave';
-  }
-}
-
 function getLeaveTypeColor(type: LeaveType) {
   switch (type) {
+    case 'minor_sick':
     case 'sick': return { bg: 'bg-red-50', text: 'text-red-600', dot: 'bg-red-400' };
     case 'emergency': return { bg: 'bg-rose-50', text: 'text-rose-600', dot: 'bg-rose-400' };
     case 'casual': return { bg: 'bg-blue-50', text: 'text-blue-600', dot: 'bg-blue-400' };
     case 'annual': return { bg: 'bg-purple-50', text: 'text-purple-600', dot: 'bg-purple-400' };
+    case 'paternity': return { bg: 'bg-cyan-50', text: 'text-cyan-600', dot: 'bg-cyan-400' };
+    case 'marriage': return { bg: 'bg-pink-50', text: 'text-pink-600', dot: 'bg-pink-400' };
+    case 'hajj': return { bg: 'bg-emerald-50', text: 'text-emerald-600', dot: 'bg-emerald-400' };
+    case 'umrah': return { bg: 'bg-teal-50', text: 'text-teal-600', dot: 'bg-teal-400' };
   }
 }
 
@@ -31,13 +29,13 @@ function getStatusBadge(status: LeaveRequest['status']) {
     case 'approved': return { label: 'Approved', cls: 'bg-green-100 text-green-700', icon: CheckCircle2 };
     case 'rejected': return { label: 'Rejected', cls: 'bg-red-100 text-red-700', icon: XCircle };
     case 'pending_manager': return { label: 'Pending Manager', cls: 'bg-yellow-100 text-yellow-700', icon: Clock };
-    case 'pending_project_manager': return { label: 'Pending Project Manager', cls: 'bg-amber-100 text-amber-700', icon: Clock };
+    case 'pending_project_manager': return { label: 'Pending Director', cls: 'bg-amber-100 text-amber-700', icon: Clock };
     case 'pending_director': return { label: 'Pending Director', cls: 'bg-orange-100 text-orange-700', icon: Clock };
   }
 }
 
 export default function LeaveRequestPage() {
-  const { currentUser, leaveRequests, submitLeaveRequest, deleteLeaveRequest } = useApp();
+  const { currentUser, leaveRequests, attendanceRecords, submitLeaveRequest, deleteLeaveRequest } = useApp();
   const { isPending, runAction } = useActionRunner();
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
@@ -54,24 +52,7 @@ export default function LeaveRequestPage() {
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState(false);
-  const [policy, setPolicy] = useState<PolicySettings>({
-    defaultReportingTime: '09:00',
-    checkInGraceMinutes: 15,
-    globalReportingTime: '09:00',
-    globalGracePeriod: 15,
-    checkOutReminderTime: '19:00',
-    workingDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
-    weeklyOffDays: ['saturday', 'sunday'],
-    workWeekEffectiveFrom: new Date().toISOString().split('T')[0],
-    sickLeaveDays: 10,
-    emergencyLeaveDays: 5,
-    casualLeaveDays: 10,
-    annualLeaveDays: 14,
-    casualLeaveNoticeHours: 48,
-    annualLeaveNoticeHours: 48,
-    leavePolicyNotes:
-      'Sick leave can be used for medical illness or treatment and does not require advance notice.\nEmergency leave can be used for urgent personal or family situations and does not require advance notice.\nCasual leave is for planned short personal time away and requires advance notice.\nAnnual leave is for planned vacations or longer breaks and requires advance notice.',
-  });
+  const [policy, setPolicy] = useState<PolicySettings>(defaultPolicySettings());
 
   useEffect(() => {
     fetch('/api/admin/policies', { credentials: 'include' })
@@ -112,7 +93,8 @@ export default function LeaveRequestPage() {
     const errs: Record<string, string> = {};
     if (!form.startDate) errs.startDate = 'Start date is required';
     if (!form.endDate) errs.endDate = 'End date is required';
-    if (form.startDate && form.startDate <= TODAY) errs.startDate = 'Leave must be scheduled for a future date';
+    if (form.startDate && form.type === 'emergency' && form.startDate < TODAY) errs.startDate = 'Emergency leave can be requested from today onward';
+    if (form.startDate && form.type !== 'emergency' && form.startDate <= TODAY) errs.startDate = 'Leave must be scheduled for a future date';
     if (form.endDate && form.startDate && form.endDate < form.startDate) errs.endDate = 'End date must be on or after start date';
     if (!form.reason.trim()) errs.reason = 'Please provide a reason';
     return errs;
@@ -150,6 +132,9 @@ export default function LeaveRequestPage() {
     .reduce((sum, request) => sum + request.totalDays, 0);
   const rejectedRequests = myRequests.filter((request) => request.status === 'rejected').length;
   const canEditPolicy = currentUser?.role === 'admin' || currentUser?.role === 'director';
+  const policyStats = currentUser
+    ? calculateEmployeePolicyStats({ user: currentUser, attendanceRecords, leaveRequests, policy })
+    : null;
 
   const savePolicy = async () => {
     await runAction('leave-policy-save', async () => {
@@ -242,12 +227,16 @@ export default function LeaveRequestPage() {
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {[
-              ['Sick Leave Days', 'sickLeaveDays'],
+              ['Casual + Minor Sick Annual Pool', 'casualLeaveDays'],
               ['Emergency Leave Days', 'emergencyLeaveDays'],
-              ['Casual Leave Days', 'casualLeaveDays'],
               ['Annual Leave Days', 'annualLeaveDays'],
+              ['Marriage Leave Days', 'marriageLeaveDays'],
+              ['Paternity Leave Days', 'paternityLeaveDays'],
+              ['Hajj Leave Calendar Days', 'hajjLeaveDays'],
+              ['Monthly Casual/Sick Limit', 'casualSickMonthlyCapDays'],
               ['Casual Leave Notice (Hours)', 'casualLeaveNoticeHours'],
-              ['Annual Leave Notice (Hours)', 'annualLeaveNoticeHours'],
+              ['Annual Notice (Working Days)', 'annualLeaveNoticeWorkingDays'],
+              ['Late Arrivals Per Casual Deduction', 'lateConversionCount'],
             ].map(([label, key]) => (
               <label key={key} className="text-sm text-gray-600">
                 {label}
@@ -298,10 +287,10 @@ export default function LeaveRequestPage() {
           {!editingPolicy && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-gray-700">
-                Sick and Emergency leave do not require notice hours.
+                Emergency leave can start today. Casual and minor sick share a combined {policy.casualLeaveDays} day yearly balance.
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-gray-700">
-                Casual requires {policy.casualLeaveNoticeHours} hours notice. Annual requires {policy.annualLeaveNoticeHours} hours notice.
+                Annual leave requires {policy.annualLeaveNoticeWorkingDays} working days notice and {policy.annualLeaveEligibilityMonths} months of service.
               </div>
             </div>
           )}
@@ -337,7 +326,7 @@ export default function LeaveRequestPage() {
               <div>
                 <label className="block text-gray-700 mb-2" style={{ fontSize: '14px', fontWeight: 500 }}>Leave Type</label>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {(['sick', 'emergency', 'casual', 'annual'] as LeaveType[]).map((type) => {
+                  {LEAVE_TYPES.map((type) => {
                     const colors = getLeaveTypeColor(type);
                     return (
                       <button
@@ -365,7 +354,7 @@ export default function LeaveRequestPage() {
                   </label>
                   <input
                     type="date"
-                    min={getTomorrow()}
+                    min={form.type === 'emergency' ? TODAY : getTomorrow()}
                     value={form.startDate}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, startDate: e.target.value }));
@@ -384,7 +373,7 @@ export default function LeaveRequestPage() {
                   </label>
                   <input
                     type="date"
-                    min={form.startDate || getTomorrow()}
+                    min={form.startDate || (form.type === 'emergency' ? TODAY : getTomorrow())}
                     value={form.endDate}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, endDate: e.target.value }));
@@ -435,8 +424,8 @@ export default function LeaveRequestPage() {
               <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                 <p className="text-blue-600" style={{ fontSize: '12px', lineHeight: '1.5' }}>
-                  Leave requests require approval from your Line Manager, Project Manager, and Director before they are confirmed.
-                  Sick and emergency leave do not require notice hours. Casual leave requires {policy.casualLeaveNoticeHours} hours notice and annual leave requires {policy.annualLeaveNoticeHours} hours notice.
+                  Leave requests require approval from your Line Manager and Director before they are confirmed.
+                  Emergency leave can be same-day. Casual and minor sick share a {policy.casualLeaveDays} day annual pool with a {policy.casualSickMonthlyCapDays} day monthly cap. Annual leave requires {policy.annualLeaveNoticeWorkingDays} working days notice.
                 </p>
               </div>
 
@@ -476,10 +465,17 @@ export default function LeaveRequestPage() {
       )}
 
       {/* Leave balance summary */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
-          { label: 'Approved Days', value: approvedDays, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: 'Annual Remaining', value: policyStats?.leave.annual.remaining ?? 0, color: 'text-purple-600', bg: 'bg-purple-50' },
+          { label: 'Casual Remaining', value: policyStats?.leave.casual.remaining ?? 0, color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Sick Remaining', value: policyStats?.leave.sick.remaining ?? 0, color: 'text-red-600', bg: 'bg-red-50' },
+          { label: 'Emergency Remaining', value: policyStats?.leave.emergency.remaining ?? 0, color: 'text-rose-600', bg: 'bg-rose-50' },
+          { label: 'Marriage Remaining', value: policyStats?.leave.marriage.remaining ?? 0, color: 'text-pink-600', bg: 'bg-pink-50' },
+          { label: 'Paternity Remaining', value: policyStats?.leave.paternity.remaining ?? 0, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+          { label: 'Upcoming Approved', value: myRequests.filter((request) => request.status === 'approved' && request.startDate >= TODAY).length, color: 'text-green-600', bg: 'bg-green-50' },
           { label: 'Pending Days', value: pendingDays, color: 'text-orange-600', bg: 'bg-orange-50' },
+          { label: 'Approved Days', value: approvedDays, color: 'text-green-600', bg: 'bg-green-50' },
           { label: 'Rejected Requests', value: rejectedRequests, color: 'text-red-600', bg: 'bg-red-50' },
         ].map((stat) => (
           <div key={stat.label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">

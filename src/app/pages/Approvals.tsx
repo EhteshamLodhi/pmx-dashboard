@@ -31,19 +31,29 @@ type ReimbursementDecision = 'approved' | 'rejected' | 'more_info';
 function getLeaveTypeLabel(type: string) {
   switch (type) {
     case 'sick': return 'Sick Leave';
+    case 'minor_sick': return 'Minor Sick Leave';
     case 'emergency': return 'Emergency Leave';
     case 'casual': return 'Casual Leave';
     case 'annual': return 'Annual Leave';
+    case 'paternity': return 'Paternity Leave';
+    case 'marriage': return 'Marriage Leave';
+    case 'hajj': return 'Hajj Leave';
+    case 'umrah': return 'Umrah Leave';
     default: return type;
   }
 }
 
 function getLeaveTypeColor(type: string) {
   switch (type) {
-    case 'sick': return 'bg-red-50 text-red-600';
+    case 'sick':
+    case 'minor_sick': return 'bg-red-50 text-red-600';
     case 'emergency': return 'bg-rose-50 text-rose-600';
     case 'casual': return 'bg-blue-50 text-blue-600';
     case 'annual': return 'bg-purple-50 text-purple-600';
+    case 'paternity': return 'bg-cyan-50 text-cyan-600';
+    case 'marriage': return 'bg-pink-50 text-pink-600';
+    case 'hajj': return 'bg-emerald-50 text-emerald-600';
+    case 'umrah': return 'bg-teal-50 text-teal-600';
     default: return 'bg-gray-50 text-gray-600';
   }
 }
@@ -90,7 +100,10 @@ function canActOnReimbursementApproval(
   currentUserRole?: string,
 ) {
   if (!approval || !currentUserId) return false;
-  return currentUserRole === 'manager' && approval.approverId === currentUserId;
+  return (
+    (currentUserRole === 'admin' && approval.level === 1) ||
+    (currentUserRole === 'director' && approval.level === 2 && approval.approverId === currentUserId)
+  );
 }
 
 function Timeline({
@@ -252,9 +265,9 @@ function LeaveApprovalCard({
 }: {
   request: LeaveRequest;
   canApprove: boolean;
-  approvalLevel: 1 | 2 | 3;
-  onApprove: (id: string, level: 1 | 2 | 3, comment: string) => Promise<void>;
-  onReject: (id: string, level: 1 | 2 | 3, comment: string) => Promise<void>;
+  approvalLevel: 1 | 2;
+  onApprove: (id: string, level: 1 | 2, comment: string) => Promise<void>;
+  onReject: (id: string, level: 1 | 2, comment: string) => Promise<void>;
   isProcessing: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -431,14 +444,24 @@ function ReimbursementApprovalCard({
 }: {
   request: ReimbursementRequest;
   canApprove: boolean;
-  approvalLevel: 1 | 2 | 3;
-  onDecision: (request: ReimbursementRequest, level: 1 | 2 | 3, decision: ReimbursementDecision, comment: string) => Promise<void>;
+  approvalLevel: 1 | 2;
+  onDecision: (request: ReimbursementRequest, level: 1 | 2, decision: ReimbursementDecision, comment: string) => Promise<void>;
   isProcessing: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [actionType, setActionType] = useState<ReimbursementDecision | null>(null);
   const [comment, setComment] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const timelineApprovals = request.approvals.map((approval) => ({
+    ...approval,
+    role: approval.level === 1 ? 'Admin' : approval.level === 2 ? 'Director' : approval.role,
+    approverName:
+      approval.level === 1 && approval.role !== 'Admin'
+        ? 'Admin'
+        : approval.level === 2 && approval.role !== 'Director'
+          ? 'Director'
+          : approval.approverName,
+  }));
 
   const handleAction = async () => {
     if (!actionType) return;
@@ -560,7 +583,7 @@ function ReimbursementApprovalCard({
           <Timeline
             submittedBy={request.userName}
             submittedAt={request.submittedAt ?? request.createdAt}
-            approvals={request.approvals}
+            approvals={timelineApprovals}
             finalLabel={request.status === 'paid' ? undefined : 'Payment'}
           />
         </div>
@@ -622,11 +645,11 @@ export default function Approvals() {
     () =>
       reimbursements.filter((request) => {
         if (!currentUser) return false;
-        if (!isApprover) return request.userId === currentUser.id;
+        if (currentUser.role === 'manager' || !isApprover) return request.userId === currentUser.id;
         if (currentUser.role === 'admin' || currentUser.role === 'director') return true;
-        return visibleUserIds.has(request.userId) || request.approvals.some((approval) => approval.approverId === currentUser.id);
+        return request.userId === currentUser.id;
       }),
-    [currentUser, isApprover, reimbursements, visibleUserIds],
+    [currentUser, isApprover, reimbursements],
   );
 
   const pendingLeavesForMe = leaveVisibleToMe.filter((request) =>
@@ -644,17 +667,17 @@ export default function Approvals() {
   const showReimbursements = categoryTab === 'all' || categoryTab === 'reimbursement';
   const showAttendance = categoryTab === 'attendance';
 
-  const getApprovalLevel = (request: LeaveRequest): 1 | 2 | 3 => {
+  const getApprovalLevel = (request: LeaveRequest): 1 | 2 => {
     const pendingApproval = currentPendingApproval(request);
-    return (pendingApproval?.level ?? 1) as 1 | 2 | 3;
+    return pendingApproval?.level === 2 ? 2 : 1;
   };
 
-  const getReimbursementApprovalLevel = (request: ReimbursementRequest): 1 | 2 | 3 => {
+  const getReimbursementApprovalLevel = (request: ReimbursementRequest): 1 | 2 => {
     const pendingApproval = currentPendingReimbursementApproval(request);
-    return (pendingApproval?.level ?? 1) as 1 | 2 | 3;
+    return pendingApproval?.level === 2 ? 2 : 1;
   };
 
-  const handleApprove = async (id: string, level: 1 | 2 | 3, comment: string) => {
+  const handleApprove = async (id: string, level: 1 | 2, comment: string) => {
     await runAction(`approval:${id}`, async () => {
       setActionError(null);
       await approveLeave(id, level, true, comment);
@@ -668,7 +691,7 @@ export default function Approvals() {
     });
   };
 
-  const handleReject = async (id: string, level: 1 | 2 | 3, comment: string) => {
+  const handleReject = async (id: string, level: 1 | 2, comment: string) => {
     await runAction(`approval:${id}`, async () => {
       setActionError(null);
       await approveLeave(id, level, false, comment);
@@ -684,7 +707,7 @@ export default function Approvals() {
 
   const handleReimbursementDecision = async (
     request: ReimbursementRequest,
-    level: 1 | 2 | 3,
+    level: 1 | 2,
     decision: ReimbursementDecision,
     comment: string,
   ) => {

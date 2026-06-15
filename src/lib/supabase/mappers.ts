@@ -31,9 +31,14 @@ type DbUserRow = {
   check_in_grace_minutes?: number | null;
   check_out_reminder_time?: string | null;
   sick_leave_days?: number | null;
+  minor_sick_leave_days?: number | null;
   emergency_leave_days?: number | null;
   casual_leave_days?: number | null;
   annual_leave_days?: number | null;
+  paternity_leave_days?: number | null;
+  marriage_leave_days?: number | null;
+  hajj_leave_days?: number | null;
+  umrah_leave_days?: number | null;
   line_manager_id?: string | null;
   project_manager_id?: string | null;
   director_id?: string | null;
@@ -193,13 +198,18 @@ export function mapUser(row: DbUserRow): User {
           : row.role === 'manager'
             ? 'Manager'
             : 'Employee',
-    reportingTime: formatTime(row.reporting_time) ?? '09:00',
-    checkInGraceMinutes: row.check_in_grace_minutes ?? 15,
-    checkOutReminderTime: formatTime(row.check_out_reminder_time) ?? '19:00',
-    sickLeaveDays: row.sick_leave_days ?? 10,
-    emergencyLeaveDays: row.emergency_leave_days ?? 5,
-    casualLeaveDays: row.casual_leave_days ?? 10,
-    annualLeaveDays: row.annual_leave_days ?? 14,
+    reportingTime: formatTime(row.reporting_time) ?? '11:00',
+    checkInGraceMinutes: row.check_in_grace_minutes ?? 0,
+    checkOutReminderTime: formatTime(row.check_out_reminder_time) ?? '20:00',
+    sickLeaveDays: row.sick_leave_days ?? 0,
+    minorSickLeaveDays: row.minor_sick_leave_days ?? 12,
+    emergencyLeaveDays: row.emergency_leave_days ?? 3,
+    casualLeaveDays: row.casual_leave_days ?? 12,
+    annualLeaveDays: row.annual_leave_days ?? 10,
+    paternityLeaveDays: row.paternity_leave_days ?? 3,
+    marriageLeaveDays: row.marriage_leave_days ?? 3,
+    hajjLeaveDays: row.hajj_leave_days ?? 40,
+    umrahLeaveDays: row.umrah_leave_days ?? 0,
     lineManagerId: row.line_manager_id ?? undefined,
     projectManagerId: row.project_manager_id ?? undefined,
     directorId: row.director_id ?? undefined,
@@ -241,15 +251,20 @@ export function mapHoliday(row: DbHolidayRow): Holiday {
 }
 
 export function mapLeaveApproval(row: DbApprovalRow): LeaveApproval {
+  const isDirector = row.approver_role.toLowerCase().includes('director');
   return {
-    level: row.approval_level,
+    level: isDirector ? 2 : row.approval_level,
     approverId: row.approver_id,
-    approverName: row.approver?.full_name ?? row.approver_role,
-    role: row.approver_role,
+    approverName: row.approver?.full_name ?? (isDirector ? 'Director' : row.approver_role),
+    role: isDirector ? 'Director' : row.approver_role,
     status: row.status,
     timestamp: row.acted_at ?? undefined,
     comment: row.comment ?? undefined,
   };
+}
+
+function isLegacyProjectManagerApproval(row: DbApprovalRow) {
+  return row.approver_role.toLowerCase().includes('project manager');
 }
 
 export function mapLeaveRequest(row: DbLeaveRow): LeaveRequest {
@@ -263,9 +278,10 @@ export function mapLeaveRequest(row: DbLeaveRow): LeaveRequest {
     endDate: row.end_date,
     totalDays: row.total_days,
     reason: row.reason,
-    status: row.status,
+    status: row.status === 'pending_project_manager' ? 'pending_director' : row.status,
     submittedAt: row.submitted_at,
     approvals: (row.approval_workflow ?? [])
+      .filter((approval) => !isLegacyProjectManagerApproval(approval))
       .sort((a, b) => a.approval_level - b.approval_level)
       .map(mapLeaveApproval),
   };

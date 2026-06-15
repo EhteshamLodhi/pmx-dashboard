@@ -20,11 +20,12 @@ import {
   ReceiptText,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { AttendanceRecord, AttendanceStatus, LeaveRequest, ReimbursementRequest, User } from '../types';
+import { AttendanceRecord, AttendanceStatus, LeaveRequest, PolicySettings, ReimbursementRequest, User } from '../types';
 import { formatDisplayTime } from '@/lib/time';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
 import { mapReimbursementRequest } from '@/lib/supabase/mappers';
 import { downloadAttendanceSnapshot, type AttendanceSnapshotRow } from '@/lib/attendance-snapshot';
+import { calculateEmployeePolicyStats } from '@/lib/leave-balances';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -59,17 +60,22 @@ function getLeaveStatusBadge(status: LeaveRequest['status']) {
     case 'approved': return { label: 'Approved', cls: 'bg-green-100 text-green-700' };
     case 'rejected': return { label: 'Rejected', cls: 'bg-red-100 text-red-700' };
     case 'pending_manager': return { label: 'Pending Manager', cls: 'bg-yellow-100 text-yellow-700' };
-    case 'pending_project_manager': return { label: 'Pending Project Manager', cls: 'bg-amber-100 text-amber-700' };
+    case 'pending_project_manager': return { label: 'Pending Director', cls: 'bg-amber-100 text-amber-700' };
     case 'pending_director': return { label: 'Pending Director', cls: 'bg-orange-100 text-orange-700' };
   }
 }
 
 function getLeaveTypeLabel(type: string) {
   switch (type) {
-    case 'sick': return 'Sick Leave';
+    case 'minor_sick':
+    case 'sick': return 'Minor Sick Leave';
     case 'emergency': return 'Emergency Leave';
     case 'casual': return 'Casual Leave';
     case 'annual': return 'Annual Leave';
+    case 'paternity': return 'Paternity Leave';
+    case 'marriage': return 'Marriage Leave';
+    case 'hajj': return 'Hajj Leave';
+    case 'umrah': return 'Umrah Leave';
     default: return type;
   }
 }
@@ -520,6 +526,7 @@ export default function Dashboard() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [reimbursements, setReimbursements] = useState<ReimbursementRequest[]>([]);
   const [adminBoardDate, setAdminBoardDate] = useState(TODAY);
+  const [policy, setPolicy] = useState<PolicySettings | null>(null);
 
   const myLeaveRequests = leaveRequests.filter((r) => r.userId === currentUser?.id).slice(0, 3);
 
@@ -541,6 +548,9 @@ export default function Dashboard() {
   const canCheckOut = !!todayRecord?.checkIn && !todayRecord?.checkOut;
   const adminBoardRows = getBoardRows(users, attendanceRecords, adminBoardDate);
   const adminBoardSummary = getBoardSummary(adminBoardRows);
+  const policyStats = currentUser
+    ? calculateEmployeePolicyStats({ user: currentUser, attendanceRecords, leaveRequests, policy })
+    : null;
 
   useEffect(() => {
     if (!isAdmin && !isDirector) return;
@@ -553,6 +563,15 @@ export default function Dashboard() {
         setReimbursements([]);
       });
   }, [isAdmin, isDirector]);
+
+  useEffect(() => {
+    fetch('/api/admin/policies', { credentials: 'include' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (body?.data) setPolicy(body.data);
+      })
+      .catch(() => setPolicy(null));
+  }, []);
 
   const directorPendingReimbursements = reimbursements.filter((request) =>
     request.approvals.some((approval) => approval.status === 'pending' && approval.role === 'Director'),
@@ -767,6 +786,42 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {policyStats && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h2 className="text-gray-900" style={{ fontSize: '15px', fontWeight: 700 }}>Leave Balance & Late Policy</h2>
+              <p className="text-gray-500 mt-0.5" style={{ fontSize: '12px' }}>
+                Leave year {policyStats.year} - every {policy?.lateConversionCount ?? 3} late arrival(s) deduct 1 casual leave
+              </p>
+            </div>
+          </div>
+          {policyStats.payrollDeductionRequired && (
+            <div className="mb-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-600 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>Payroll deduction required for {policyStats.pendingPayrollDeductions} day(s). Please contact admin.</span>
+            </div>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: 'Annual Remaining', value: policyStats.leave.annual.remaining, tone: 'text-purple-700 bg-purple-50' },
+              { label: 'Casual Remaining', value: policyStats.leave.casual.remaining, tone: 'text-blue-700 bg-blue-50' },
+              { label: 'Sick Remaining', value: policyStats.leave.sick.remaining, tone: 'text-red-700 bg-red-50' },
+              { label: 'Emergency Remaining', value: policyStats.leave.emergency.remaining, tone: 'text-rose-700 bg-rose-50' },
+              { label: 'Marriage Remaining', value: policyStats.leave.marriage.remaining, tone: 'text-pink-700 bg-pink-50' },
+              { label: 'Paternity Remaining', value: policyStats.leave.paternity.remaining, tone: 'text-cyan-700 bg-cyan-50' },
+              { label: 'Late This Month', value: policyStats.lateArrivalsThisMonth, tone: 'text-orange-700 bg-orange-50' },
+              { label: 'Casual Deducted', value: policyStats.casualLeavesDeductedDueToLate, tone: 'text-amber-700 bg-amber-50' },
+            ].map((item) => (
+              <div key={item.label} className={`rounded-xl p-3 ${item.tone}`}>
+                <p style={{ fontSize: '11px', fontWeight: 700 }}>{item.label}</p>
+                <p className="mt-1" style={{ fontSize: '20px', fontWeight: 800 }}>{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Admin: Daily Attendance Board ── */}
       {isAdmin && (
