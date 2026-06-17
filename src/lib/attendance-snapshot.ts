@@ -64,6 +64,13 @@ function minutesFromTime(value?: string) {
   return hours * 60 + minutes;
 }
 
+function minutesToTime(value: number) {
+  const normalized = ((value % 1440) + 1440) % 1440;
+  const hours = Math.floor(normalized / 60);
+  const minutes = normalized % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
 function rankColor(rank?: number | null) {
   if (!rank) return '#F8FAFC';
   if (rank <= 3) return '#86D18B';
@@ -74,9 +81,20 @@ function rankColor(rank?: number | null) {
 function timeCellColor(row: AttendanceSnapshotRow, key: 'checkIn' | 'checkOut') {
   if (row.status === 'absent') return '#FCA5A5';
   if (row.status === 'on-leave' || row.status === 'holiday' || row.status === 'weekly-off') return '#E5E7EB';
-  if (key === 'checkIn' && row.status === 'late') return '#FDBA74';
-  if (key === 'checkOut' && row.checkOut) return '#FCA5A5';
-  if (key === 'checkOut' && row.checkIn && !row.checkOut) return '#FDE68A';
+  const reportingMinutes = minutesFromTime(row.reportingTime);
+  if (key === 'checkIn') {
+    const checkInMinutes = minutesFromTime(row.checkIn);
+    if (checkInMinutes === null || reportingMinutes === null) return '#FCA5A5';
+    return checkInMinutes <= reportingMinutes ? '#FFFFFF' : '#FDE68A';
+  }
+  if (key === 'checkOut') {
+    const checkOutMinutes = minutesFromTime(row.checkOut);
+    if (checkOutMinutes === null || reportingMinutes === null) return row.checkIn ? '#FDE68A' : '#FCA5A5';
+    const expectedLeaving = reportingMinutes + 9 * 60;
+    if (checkOutMinutes <= expectedLeaving) return '#FFFFFF';
+    if (checkOutMinutes <= expectedLeaving + 60) return '#FDE68A';
+    return '#FCA5A5';
+  }
   return '#FFFFFF';
 }
 
@@ -86,12 +104,26 @@ export function downloadAttendanceSnapshot(options: {
   rows: AttendanceSnapshotRow[];
   summary: AttendanceSnapshotSummary;
 }) {
-  const width = 1080;
-  const rowHeight = 58;
-  const visibleRows = options.rows;
-  const headerHeight = 156;
-  const summaryTop = 192;
-  const tableTop = 302;
+  const width = 1180;
+  const rowHeight = 64;
+  const headerHeight = 150;
+  const summaryTop = 184;
+  const tableTop = 292;
+  const rankedRows = new Map<number, number>();
+  options.rows
+    .map((row, index) => ({ row, index, minutes: minutesFromTime(row.checkIn) }))
+    .filter((item): item is { row: AttendanceSnapshotRow; index: number; minutes: number } => item.minutes !== null)
+    .sort((a, b) => a.minutes - b.minutes)
+    .forEach((item, index) => rankedRows.set(item.index, index + 1));
+
+  const visibleRows = options.rows
+    .map((row, index) => ({ row, rank: rankedRows.get(index) }))
+    .sort((a, b) => {
+      if (a.rank && b.rank) return a.rank - b.rank;
+      if (a.rank) return -1;
+      if (b.rank) return 1;
+      return a.row.employeeName.localeCompare(b.row.employeeName);
+    });
   const height = tableTop + 54 + visibleRows.length * rowHeight + 46;
   const scale = 2;
   const canvas = document.createElement('canvas');
@@ -101,7 +133,7 @@ export function downloadAttendanceSnapshot(options: {
   if (!context) return;
 
   context.scale(scale, scale);
-  context.fillStyle = '#F8FAFC';
+  context.fillStyle = '#FFFFFF';
   context.fillRect(0, 0, width, height);
 
   context.fillStyle = '#0B8F3B';
@@ -135,36 +167,31 @@ export function downloadAttendanceSnapshot(options: {
     ['Late', options.summary.late, '#F59E0B'],
     ['Absent', options.summary.absent, '#FF3347'],
     ['On Leave', options.summary.onLeave, '#0EA5E9'],
-    ['Total Employees', options.summary.total, '#111827'],
+    ['Total', options.summary.total, '#10B981'],
   ] as const;
 
   summaryCards.forEach(([label, value, color], index) => {
-    const cardWidth = 190;
-    const x = 36 + index * 204;
-    context.fillStyle = index === 4 ? '#111827' : '#FFFFFF';
+    const cardWidth = 178;
+    const x = 36 + index * 190;
+    context.fillStyle = '#F8FAFC';
     roundRect(context, x, summaryTop, cardWidth, 74, 16);
     context.fill();
     context.fillStyle = color;
     context.font = '700 31px Arial';
     context.fillText(String(value), x + 18, summaryTop + 45);
-    context.fillStyle = index === 4 ? '#FFFFFF' : '#475569';
+    context.fillStyle = '#475569';
     context.font = '700 17px Arial';
     drawText(context, label, x + 72, summaryTop + 43, cardWidth - 84);
   });
 
-  const rankedRows = new Map<number, number>();
-  visibleRows
-    .map((row, index) => ({ row, index, minutes: minutesFromTime(row.checkIn) }))
-    .filter((item): item is { row: AttendanceSnapshotRow; index: number; minutes: number } => item.minutes !== null)
-    .sort((a, b) => a.minutes - b.minutes)
-    .forEach((item, index) => rankedRows.set(item.index, index + 1));
-
   const columns = [
-    { label: 'Name', x: 24, width: 292 },
-    { label: 'Cut Off Arrival Time', x: 316, width: 188 },
-    { label: options.dateLabel.split(',').at(0) ?? 'Check In', x: 504, width: 188 },
-    { label: 'Ranking', x: 692, width: 132 },
-    { label: 'Check Out', x: 824, width: 232 },
+    { label: 'Employee', x: 24, width: 246 },
+    { label: 'Project', x: 270, width: 170 },
+    { label: 'Reporting Time', x: 440, width: 150 },
+    { label: 'Check In', x: 590, width: 150 },
+    { label: 'Rank', x: 740, width: 96 },
+    { label: 'Check Out', x: 836, width: 150 },
+    { label: 'Status', x: 986, width: 170 },
   ];
 
   context.fillStyle = '#135F7B';
@@ -178,13 +205,14 @@ export function downloadAttendanceSnapshot(options: {
   });
   context.textAlign = 'left';
 
-  visibleRows.forEach((row, index) => {
+  visibleRows.forEach(({ row, rank }, index) => {
     const y = tableTop + 54 + index * rowHeight;
-    const rank = rankedRows.get(index);
     const checkOutValue = row.checkOut ? formatDisplayTime(row.checkOut) : row.checkIn ? 'Active' : 'NA';
     const checkInValue = row.checkIn ? formatDisplayTime(row.checkIn) : row.status === 'on-leave' ? 'Leave' : 'NA';
+    const reportingMinutes = minutesFromTime(row.reportingTime);
+    const leavingTime = reportingMinutes === null ? 'NA' : formatDisplayTime(minutesToTime(reportingMinutes + 9 * 60));
 
-    context.fillStyle = index % 2 === 0 ? '#F8FAFC' : '#E0F2FE';
+    context.fillStyle = index % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
     context.fillRect(24, y, width - 48, rowHeight);
     context.strokeStyle = '#111827';
     context.lineWidth = 1;
@@ -194,31 +222,47 @@ export function downloadAttendanceSnapshot(options: {
     });
 
     context.fillStyle = '#0F172A';
-    context.font = '700 21px Arial';
+    context.font = '700 20px Arial';
     context.textAlign = 'left';
-    drawText(context, row.employeeName, columns[0].x + 12, y + 36, columns[0].width - 20);
+    drawText(context, row.employeeName, columns[0].x + 12, y + 30, columns[0].width - 20);
+    context.fillStyle = '#64748B';
+    context.font = '600 15px Arial';
+    drawText(context, row.position ?? 'Employee', columns[0].x + 12, y + 51, columns[0].width - 20);
 
     context.fillStyle = '#FFFFFF';
     context.fillRect(columns[1].x + 1, y + 1, columns[1].width - 2, rowHeight - 2);
-    context.fillStyle = '#111827';
-    context.font = '700 20px Arial';
+    context.fillStyle = '#334155';
+    context.font = '700 18px Arial';
     context.textAlign = 'center';
-    context.fillText(formatDisplayTime(row.reportingTime), columns[1].x + columns[1].width / 2, y + 36);
+    drawText(context, row.project ?? 'Unassigned', columns[1].x + columns[1].width / 2, y + 39, columns[1].width - 18);
 
-    context.fillStyle = timeCellColor(row, 'checkIn');
+    context.fillStyle = '#FFFFFF';
     context.fillRect(columns[2].x + 1, y + 1, columns[2].width - 2, rowHeight - 2);
     context.fillStyle = '#111827';
-    context.fillText(checkInValue, columns[2].x + columns[2].width / 2, y + 36);
+    context.font = '700 20px Arial';
+    context.fillText(formatDisplayTime(row.reportingTime), columns[2].x + columns[2].width / 2, y + 30);
+    context.fillStyle = '#64748B';
+    context.font = '600 13px Arial';
+    context.fillText(`Leave ${leavingTime}`, columns[2].x + columns[2].width / 2, y + 51);
 
-    context.fillStyle = rankColor(rank);
+    context.fillStyle = timeCellColor(row, 'checkIn');
     context.fillRect(columns[3].x + 1, y + 1, columns[3].width - 2, rowHeight - 2);
     context.fillStyle = '#111827';
-    context.fillText(rank ? String(rank) : 'NA', columns[3].x + columns[3].width / 2, y + 36);
+    context.fillText(checkInValue, columns[3].x + columns[3].width / 2, y + 39);
+
+    context.fillStyle = rankColor(rank);
+    context.fillRect(columns[4].x + 1, y + 1, columns[4].width - 2, rowHeight - 2);
+    context.fillStyle = '#111827';
+    context.fillText(rank ? String(rank) : 'NA', columns[4].x + columns[4].width / 2, y + 39);
 
     context.fillStyle = timeCellColor(row, 'checkOut');
-    context.fillRect(columns[4].x + 1, y + 1, columns[4].width - 2, rowHeight - 2);
+    context.fillRect(columns[5].x + 1, y + 1, columns[5].width - 2, rowHeight - 2);
     context.fillStyle = row.checkOut || !row.checkIn ? '#111827' : '#C2410C';
-    context.fillText(checkOutValue, columns[4].x + columns[4].width / 2, y + 36);
+    context.fillText(checkOutValue, columns[5].x + columns[5].width / 2, y + 39);
+
+    context.fillStyle = statusColor(row.status);
+    context.font = '700 18px Arial';
+    context.fillText(row.statusLabel, columns[6].x + columns[6].width / 2, y + 39);
     context.textAlign = 'left';
   });
 

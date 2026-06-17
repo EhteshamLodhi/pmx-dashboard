@@ -326,6 +326,15 @@ function getBoardSummary(rows: ReturnType<typeof getBoardRows>) {
   };
 }
 
+function sortBoardRows(rows: ReturnType<typeof getBoardRows>) {
+  return [...rows].sort((a, b) => {
+    if (a.rank && b.rank) return a.rank - b.rank;
+    if (a.rank) return -1;
+    if (b.rank) return 1;
+    return a.user.name.localeCompare(b.user.name);
+  });
+}
+
 function DynamicAdminDailyBoard({
   selectedDate,
   rows,
@@ -337,6 +346,8 @@ function DynamicAdminDailyBoard({
 }) {
   const selectedDateLabel = formatDateLabel(selectedDate);
   const generatedAt = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const displayRows = sortBoardRows(rows);
+  const boardGridColumns = 'minmax(180px, 1.45fr) minmax(115px, 0.9fr) 108px 108px 72px 108px 92px';
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -380,15 +391,20 @@ function DynamicAdminDailyBoard({
         </div>
       </div>
 
-      <div className="hidden md:grid grid-cols-12 gap-0 px-4 py-2 border-b border-gray-100 bg-gray-50">
+      <div
+        className="hidden md:grid gap-0 px-4 py-2 border-b border-gray-100 bg-gray-50"
+        style={{ gridTemplateColumns: boardGridColumns }}
+      >
         {[
-          { label: 'Employee', span: 'col-span-4' },
-          { label: 'Project', span: 'col-span-3' },
-          { label: 'Check In', span: 'col-span-2 text-center' },
-          { label: 'Check Out', span: 'col-span-2 text-center' },
-          { label: 'Status', span: 'col-span-1 text-center' },
+          { label: 'Employee', align: 'text-left' },
+          { label: 'Project', align: 'text-left' },
+          { label: 'Reporting', align: 'text-center' },
+          { label: 'Check In', align: 'text-center' },
+          { label: 'Rank', align: 'text-center' },
+          { label: 'Check Out', align: 'text-center' },
+          { label: 'Status', align: 'text-center' },
         ].map((col) => (
-          <div key={col.label} className={col.span}>
+          <div key={col.label} className={col.align}>
             <span className="text-gray-400 uppercase" style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.07em' }}>
               {col.label}
             </span>
@@ -397,14 +413,15 @@ function DynamicAdminDailyBoard({
       </div>
 
       <div className="hidden md:block divide-y divide-gray-50">
-        {rows.map(({ user, record, badge, rank }, idx) => {
+        {displayRows.map(({ user, record, badge, rank }, idx) => {
           const duration = getDuration(record?.checkIn, record?.checkOut);
           return (
             <div
               key={user.id}
-              className={`grid grid-cols-12 gap-0 px-4 py-3 items-center ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
+              className={`grid gap-0 px-4 py-3 items-center ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
+              style={{ gridTemplateColumns: boardGridColumns }}
             >
-              <div className="col-span-4 flex items-center gap-2.5 min-w-0">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${record?.checkIn ? 'bg-green-100' : 'bg-gray-100'}`}>
                   <span className={`${record?.checkIn ? 'text-green-700' : 'text-gray-500'}`} style={{ fontSize: '11px', fontWeight: 700 }}>
                     {user.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
@@ -415,22 +432,25 @@ function DynamicAdminDailyBoard({
                   <p className="text-gray-400 truncate" style={{ fontSize: '11px' }}>{user.position}</p>
                 </div>
               </div>
-              <div className="col-span-2 text-center">
+              <div className="min-w-0">
+                <p className="text-gray-600 truncate" style={{ fontSize: '12px', fontWeight: 500 }}>{user.project ?? 'Unassigned'}</p>
+              </div>
+              <div className="text-center">
                 <p className="text-gray-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 700 }}>{formatDisplayTime(user.reportingTime)}</p>
               </div>
-              <div className="col-span-2 text-center">
+              <div className="text-center">
                 <span className="text-green-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 600 }}>
                   {formatDisplayTime(record?.checkIn)}
                 </span>
               </div>
-              <div className="col-span-1 text-center">
+              <div className="text-center">
                 <span className={`inline-flex min-w-7 justify-center rounded-lg px-2 py-1 text-xs font-bold ${
                   rank ? (rank <= 3 ? 'bg-green-100 text-green-700' : rank <= 7 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700') : 'bg-gray-100 text-gray-400'
                 }`}>
                   {rank ?? 'NA'}
                 </span>
               </div>
-              <div className="col-span-2 text-center">
+              <div className="text-center">
                 {record?.checkOut ? (
                   <div>
                     <span className="text-blue-700 tabular-nums" style={{ fontSize: '13px', fontWeight: 600 }}>
@@ -444,7 +464,7 @@ function DynamicAdminDailyBoard({
                   <span className="text-gray-300" style={{ fontSize: '13px' }}>-</span>
                 )}
               </div>
-              <div className="col-span-1 flex justify-center">
+              <div className="flex justify-center">
                 <div className={`w-2.5 h-2.5 rounded-full ${badge.dot}`} title={badge.label} />
               </div>
             </div>
@@ -453,7 +473,7 @@ function DynamicAdminDailyBoard({
       </div>
 
       <div className="md:hidden divide-y divide-gray-50">
-        {rows.map(({ user, record, badge, rank }) => (
+        {displayRows.map(({ user, record, badge, rank }) => (
           <div key={user.id} className="px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3 min-w-0">
