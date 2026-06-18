@@ -282,7 +282,7 @@ function AdminDailyBoard() {
 
 // ─── Employee Dashboard ─────────────────────────────────────────────────────────
 function getBoardRows(users: User[], attendanceRecords: AttendanceRecord[], selectedDate: string) {
-  const activeUsers = users.filter((user) => user.isActive);
+  const activeUsers = users.filter((user) => user.isActive && user.includeInAttendanceReport !== false);
   const dateRecords = attendanceRecords.filter((record) => record.date === selectedDate);
 
   const rows = activeUsers.map((user) => {

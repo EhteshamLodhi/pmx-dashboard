@@ -1,7 +1,7 @@
 'use client';
 
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Users, Search, Edit3, Check, X, ChevronDown, Shield, UserCheck, UserX, PlusCircle, SlidersHorizontal, Loader2, CalendarPlus, Trash2 } from 'lucide-react';
+import { Users, Search, Edit3, Check, X, ChevronDown, Shield, UserCheck, UserX, PlusCircle, SlidersHorizontal, Loader2, CalendarPlus, Trash2, Eye, EyeOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { Holiday, HolidayType, PolicySettings, User } from '../types';
 import { useActionRunner } from '@/app/hooks/useActionRunner';
@@ -41,6 +41,7 @@ function UserRow({
     directorId: user.directorId ?? '',
     role: user.role,
     isActive: user.isActive,
+    includeInAttendanceReport: user.includeInAttendanceReport ?? true,
     reportingTime: user.reportingTime ?? '11:00',
     checkInGraceMinutes: user.checkInGraceMinutes ?? 0,
     checkOutReminderTime: user.checkOutReminderTime ?? '20:00',
@@ -99,6 +100,11 @@ function UserRow({
               {!user.isActive && (
                 <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-500" style={{ fontSize: '11px', fontWeight: 600 }}>
                   Inactive
+                </span>
+              )}
+              {user.includeInAttendanceReport === false && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700" style={{ fontSize: '11px', fontWeight: 600 }}>
+                  Hidden from board
                 </span>
               )}
             </div>
@@ -322,6 +328,29 @@ function UserRow({
                 Inactive
               </button>
             </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 bg-gray-50 rounded-lg px-3 py-2">
+            <div>
+              <span className="text-gray-700 block" style={{ fontSize: '13px', fontWeight: 500 }}>
+                Attendance Board & Snapshot
+              </span>
+              <span className="text-gray-400 block mt-0.5" style={{ fontSize: '11px' }}>
+                Include this user in the dashboard board and downloaded daily report.
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.includeInAttendanceReport}
+              aria-label="Include user in attendance board and snapshot"
+              onClick={() => setForm((value) => ({ ...value, includeInAttendanceReport: !value.includeInAttendanceReport }))}
+              className={`relative h-7 w-12 flex-shrink-0 rounded-full transition-colors ${form.includeInAttendanceReport ? 'bg-green-600' : 'bg-gray-300'}`}
+            >
+              <span className={`absolute top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white shadow-sm transition-transform ${form.includeInAttendanceReport ? 'translate-x-6' : 'translate-x-1'}`}>
+                {form.includeInAttendanceReport ? <Eye className="h-3 w-3 text-green-600" /> : <EyeOff className="h-3 w-3 text-gray-500" />}
+              </span>
+            </button>
           </div>
 
           <div className="flex gap-2 pt-1">
@@ -899,6 +928,7 @@ export default function UserManagement() {
     lineManagerId: '',
     projectManagerId: '',
     directorId: '',
+    includeInAttendanceReport: true,
   });
 
   const filteredUsers = useMemo(() => {
@@ -953,6 +983,7 @@ export default function UserManagement() {
         lineManagerId: '',
         projectManagerId: '',
         directorId: '',
+        includeInAttendanceReport: true,
       });
     }, {
       loading: 'Creating user...',
@@ -1019,7 +1050,7 @@ export default function UserManagement() {
                   <input
                     type={type}
                     min={type === 'number' ? 0 : undefined}
-                    value={(newUser as Record<string, string | number>)[key]}
+                    value={(newUser as unknown as Record<string, string | number>)[key]}
                     onChange={(event) =>
                       setNewUser((value) => ({
                         ...value,

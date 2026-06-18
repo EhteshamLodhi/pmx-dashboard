@@ -44,6 +44,7 @@ type DbUserRow = {
   director_id?: string | null;
   phone?: string | null;
   is_active?: boolean | null;
+  include_in_attendance_report?: boolean | null;
   joined_at?: string | null;
   project?: { name?: string | null } | null;
 };
@@ -215,6 +216,7 @@ export function mapUser(row: DbUserRow): User {
     directorId: row.director_id ?? undefined,
     joinDate: row.joined_at ?? new Date().toISOString().split('T')[0],
     isActive: row.is_active ?? true,
+    includeInAttendanceReport: row.include_in_attendance_report ?? true,
     phone: row.phone ?? undefined,
   };
 }

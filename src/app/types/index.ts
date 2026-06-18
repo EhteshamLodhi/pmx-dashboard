@@ -24,6 +24,7 @@ export interface User {
   directorId?: string;
   joinDate: string;
   isActive: boolean;
+  includeInAttendanceReport?: boolean;
   phone?: string;
 }
 

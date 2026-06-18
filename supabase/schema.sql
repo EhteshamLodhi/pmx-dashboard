@@ -76,6 +76,7 @@ create table if not exists public.users (
   director_id uuid references public.users(id) on delete set null,
   phone text,
   is_active boolean not null default true,
+  include_in_attendance_report boolean not null default true,
   joined_at date not null default current_date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -100,6 +101,7 @@ alter table public.users add column if not exists paternity_leave_days integer n
 alter table public.users add column if not exists marriage_leave_days integer not null default 3;
 alter table public.users add column if not exists hajj_leave_days integer not null default 40;
 alter table public.users add column if not exists umrah_leave_days integer not null default 0;
+alter table public.users add column if not exists include_in_attendance_report boolean not null default true;
 
 drop table if exists public.departments;
 

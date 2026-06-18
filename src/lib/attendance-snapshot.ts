@@ -19,15 +19,6 @@ export type AttendanceSnapshotSummary = {
   total: number;
 };
 
-function statusColor(status: string) {
-  if (status === 'present' || status === 'checked-in-only') return '#0ABF53';
-  if (status === 'late') return '#F59E0B';
-  if (status === 'on-leave') return '#0EA5E9';
-  if (status === 'holiday') return '#0284C7';
-  if (status === 'weekly-off') return '#6B7280';
-  return '#FF3347';
-}
-
 function roundRect(
   context: CanvasRenderingContext2D,
   x: number,
@@ -124,7 +115,8 @@ export function downloadAttendanceSnapshot(options: {
       if (b.rank) return 1;
       return a.row.employeeName.localeCompare(b.row.employeeName);
     });
-  const height = tableTop + 54 + visibleRows.length * rowHeight + 46;
+  const legendHeight = 112;
+  const height = tableTop + 54 + visibleRows.length * rowHeight + legendHeight;
   const scale = 2;
   const canvas = document.createElement('canvas');
   canvas.width = width * scale;
@@ -185,13 +177,12 @@ export function downloadAttendanceSnapshot(options: {
   });
 
   const columns = [
-    { label: 'Employee', x: 24, width: 246 },
-    { label: 'Project', x: 270, width: 170 },
-    { label: 'Reporting Time', x: 440, width: 150 },
-    { label: 'Check In', x: 590, width: 150 },
-    { label: 'Rank', x: 740, width: 96 },
-    { label: 'Check Out', x: 836, width: 150 },
-    { label: 'Status', x: 986, width: 170 },
+    { label: 'Employee', x: 24, width: 280 },
+    { label: 'Project', x: 304, width: 200 },
+    { label: 'Reporting Time', x: 504, width: 170 },
+    { label: 'Check In', x: 674, width: 170 },
+    { label: 'Rank', x: 844, width: 110 },
+    { label: 'Check Out', x: 954, width: 202 },
   ];
 
   context.fillStyle = '#135F7B';
@@ -199,8 +190,8 @@ export function downloadAttendanceSnapshot(options: {
   context.fillStyle = '#FFFFFF';
   context.font = '700 18px Arial';
   columns.forEach((column) => {
-    context.textAlign = column.label === 'Name' ? 'left' : 'center';
-    const textX = column.label === 'Name' ? column.x + 12 : column.x + column.width / 2;
+    context.textAlign = column.label === 'Employee' ? 'left' : 'center';
+    const textX = column.label === 'Employee' ? column.x + 12 : column.x + column.width / 2;
     drawText(context, column.label, textX, tableTop + 34, column.width - 18);
   });
   context.textAlign = 'left';
@@ -260,17 +251,36 @@ export function downloadAttendanceSnapshot(options: {
     context.fillStyle = row.checkOut || !row.checkIn ? '#111827' : '#C2410C';
     context.fillText(checkOutValue, columns[5].x + columns[5].width / 2, y + 39);
 
-    context.fillStyle = statusColor(row.status);
-    context.font = '700 18px Arial';
-    context.fillText(row.statusLabel, columns[6].x + columns[6].width / 2, y + 39);
     context.textAlign = 'left';
   });
 
-  if (options.rows.length > visibleRows.length) {
-    context.fillStyle = '#64748B';
-    context.font = '600 18px Arial';
-    context.fillText(`+${options.rows.length - visibleRows.length} more employees in portal`, 54, height - 42);
-  }
+  const legendTop = tableTop + 54 + visibleRows.length * rowHeight + 24;
+  const drawLegendItem = (x: number, y: number, color: string, label: string) => {
+    context.fillStyle = color;
+    context.strokeStyle = '#CBD5E1';
+    context.lineWidth = 1;
+    context.fillRect(x, y - 14, 22, 22);
+    context.strokeRect(x, y - 14, 22, 22);
+    context.fillStyle = '#334155';
+    context.font = '600 15px Arial';
+    context.textAlign = 'left';
+    context.fillText(label, x + 32, y + 3);
+  };
+
+  context.fillStyle = '#0F172A';
+  context.font = '700 16px Arial';
+  context.fillText('CHECK IN', 36, legendTop);
+  drawLegendItem(148, legendTop, '#FFFFFF', 'On time / on dot');
+  drawLegendItem(390, legendTop, '#FDE68A', 'Late');
+  drawLegendItem(548, legendTop, '#FCA5A5', 'Absent');
+
+  context.fillStyle = '#0F172A';
+  context.font = '700 16px Arial';
+  context.fillText('CHECK OUT', 36, legendTop + 42);
+  drawLegendItem(148, legendTop + 42, '#FFFFFF', 'On leaving time');
+  drawLegendItem(390, legendTop + 42, '#FDE68A', 'Up to 1 hour after');
+  drawLegendItem(650, legendTop + 42, '#FCA5A5', 'More than 1 hour after');
+  drawLegendItem(974, legendTop + 42, '#E5E7EB', 'Leave / off');
 
   const link = document.createElement('a');
   link.download = `powermatix-attendance-${options.dateLabel.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;

@@ -90,6 +90,7 @@ export async function POST(request: Request) {
       project_manager_id: body.projectManagerId || null,
       director_id: body.directorId || null,
       is_active: true,
+      include_in_attendance_report: body.includeInAttendanceReport ?? true,
     })
     .select()
     .single();
@@ -138,6 +139,7 @@ export async function PATCH(request: Request) {
     director_id: updates.directorId || null,
     phone: updates.phone,
     is_active: updates.isActive,
+    include_in_attendance_report: updates.includeInAttendanceReport,
   };
 
   if (project !== undefined) payload.project_id = projectId;
